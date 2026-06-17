@@ -7,19 +7,25 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.os.Build
 import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import androidx.documentfile.provider.DocumentFile
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import java.io.BufferedReader
+import java.io.File
+import java.io.InputStreamReader
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 
@@ -31,6 +37,9 @@ class DownloadService : Service() {
 
     @Inject
     lateinit var downloadRepository: DownloadRepository
+
+    @Inject
+    lateinit var settingsManager: SettingsManager
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val activeJobs = ConcurrentHashMap<Long, Job>()
@@ -188,15 +197,24 @@ class DownloadService : Service() {
                 result.onSuccess {
                     val currentDbEntity = downloadRepository.getById(id)
                     if (currentDbEntity != null) {
-                        downloadRepository.update(
-                            currentDbEntity.copy(
-                                status = DownloadStatus.COMPLETED,
-                                progressPercent = 100f,
-                                errorMessage = null
-                            )
-                        )
+                        launch {
+                            if (currentDbEntity.convertToMp3) {
+                                convertVideoToMp3(currentDbEntity)
+                            } else {
+                                copyDownloadedFileToSaf(currentDbEntity.filePath)
+                                downloadRepository.update(
+                                    currentDbEntity.copy(
+                                        status = DownloadStatus.COMPLETED,
+                                        progressPercent = 100f,
+                                        errorMessage = null
+                                    )
+                                )
+                                cancelNotification(id.toInt())
+                            }
+                        }
+                    } else {
+                        cancelNotification(id.toInt())
                     }
-                    cancelNotification(id.toInt())
                 }.onFailure { ex ->
                     val errorMsg = ex.message ?: "حدث خطأ أثناء تحميل الملف"
                     val currentDbEntity = downloadRepository.getById(id)
@@ -323,6 +341,170 @@ class DownloadService : Service() {
             mbs >= 1.0 -> String.format("%.1f MB", mbs)
             kbs >= 1.0 -> String.format("%.1f KB", kbs)
             else -> "$bytes B"
+        }
+    }
+
+    private suspend fun copyDownloadedFileToSaf(filePath: String) {
+        val file = File(filePath)
+        if (!file.exists()) return
+        val targetFolderUri = settingsManager.defaultFolderUri.firstOrNull() ?: return
+        if (targetFolderUri.isEmpty()) return
+
+        try {
+            val treeUri = Uri.parse(targetFolderUri)
+            val documentDir = DocumentFile.fromTreeUri(applicationContext, treeUri)
+            if (documentDir != null && documentDir.exists() && documentDir.isDirectory) {
+                val mimeType = if (filePath.endsWith(".mp3")) "audio/mpeg" else "video/mp4"
+                val newFile = documentDir.createFile(mimeType, file.name)
+                if (newFile != null) {
+                    applicationContext.contentResolver.openOutputStream(newFile.uri)?.use { outStream ->
+                        file.inputStream().use { inStream ->
+                            inStream.copyTo(outStream)
+                        }
+                    }
+                    Log.d("DownloadService", "Copied downloaded file to SAF folder: ${newFile.uri}")
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("DownloadService", "Error copying file to SAF folder: ${e.message}", e)
+        }
+    }
+
+    private suspend fun convertVideoToMp3(download: DownloadEntity) {
+        val ffmpegFile = File(applicationContext.applicationInfo.nativeLibraryDir, "libffmpeg.so")
+        if (!ffmpegFile.exists()) {
+            val errorMsg = "ملف FFmpeg غير متوفر للتحويل الاستخراجي"
+            Log.e("DownloadService", errorMsg)
+            downloadRepository.update(
+                download.copy(
+                    status = DownloadStatus.FAILED,
+                    errorMessage = errorMsg
+                )
+            )
+            showErrorNotification(download.id.toInt(), download.title, errorMsg)
+            return
+        }
+
+        val inputPath = download.filePath
+        val inputFile = File(inputPath)
+        if (!inputFile.exists()) {
+            val errorMsg = "ملف التحميل المصدر غير موجود للتحويل"
+            Log.e("DownloadService", errorMsg)
+            downloadRepository.update(
+                download.copy(
+                    status = DownloadStatus.FAILED,
+                    errorMessage = errorMsg
+                )
+            )
+            showErrorNotification(download.id.toInt(), download.title, errorMsg)
+            return
+        }
+
+        val dotIndex = inputPath.lastIndexOf('.')
+        val outputPath = if (dotIndex != -1) {
+            inputPath.substring(0, dotIndex) + ".mp3"
+        } else {
+            "$inputPath.mp3"
+        }
+
+        updateNotification(
+            id = download.id.toInt(),
+            title = "جارٍ التحويل: ${download.title}",
+            progressPercent = 0f,
+            speedStr = "معالجة وتحويل الصوت",
+            downloadedBytes = 0,
+            totalBytes = 100
+        )
+
+        try {
+            val pb = ProcessBuilder(
+                ffmpegFile.absolutePath,
+                "-y",
+                "-i", inputPath,
+                "-vn",
+                "-ac", "2",
+                "-ar", "44100",
+                "-ab", "192k",
+                outputPath
+            ).redirectErrorStream(true)
+
+            val process = pb.start()
+            val reader = BufferedReader(InputStreamReader(process.inputStream))
+
+            var line: String? = reader.readLine()
+            var totalDurationSecs = 1.0 // fallback
+
+            val durationRegex = "Duration: (\\d{2}):(\\d{2}):(\\d{2})".toRegex()
+            val timeRegex = "time=(\\d{2}):(\\d{2}):(\\d{2})".toRegex()
+
+            while (line != null) {
+                Log.d("FFmpegConversion", line)
+
+                durationRegex.find(line)?.let { match ->
+                    val hrs = match.groupValues[1].toInt()
+                    val mins = match.groupValues[2].toInt()
+                    val secs = match.groupValues[3].toInt()
+                    totalDurationSecs = (hrs * 3600 + mins * 60 + secs).toDouble()
+                    if (totalDurationSecs <= 0.0) totalDurationSecs = 1.0
+                }
+
+                timeRegex.find(line)?.let { match ->
+                    val hrs = match.groupValues[1].toInt()
+                    val mins = match.groupValues[2].toInt()
+                    val secs = match.groupValues[3].toInt()
+                    val elapsed = hrs * 3600 + mins * 60 + secs
+                    val progressPct = ((elapsed.toFloat() / totalDurationSecs.toFloat()) * 100f).coerceIn(0f, 100f)
+
+                    updateNotification(
+                        id = download.id.toInt(),
+                        title = "جارٍ استخراج الصوت... | ${download.title}",
+                        progressPercent = progressPct,
+                        speedStr = "FFmpeg",
+                        downloadedBytes = elapsed.toLong(),
+                        totalBytes = totalDurationSecs.toLong()
+                    )
+                }
+                line = reader.readLine()
+            }
+
+            val exitCode = process.waitFor()
+            if (exitCode == 0) {
+                if (inputFile.exists()) {
+                    inputFile.delete()
+                }
+
+                copyDownloadedFileToSaf(outputPath)
+
+                downloadRepository.update(
+                    download.copy(
+                        filePath = outputPath,
+                        status = DownloadStatus.COMPLETED,
+                        progressPercent = 100f,
+                        errorMessage = null
+                    )
+                )
+                cancelNotification(download.id.toInt())
+            } else {
+                val errMsg = "فشل تحويل صيغة الصوت برمز الخروج $exitCode"
+                downloadRepository.update(
+                    download.copy(
+                        status = DownloadStatus.FAILED,
+                        errorMessage = errMsg
+                    )
+                )
+                showErrorNotification(download.id.toInt(), download.title, errMsg)
+            }
+
+        } catch (e: Exception) {
+            val errMsg = "حدث خطأ غير متوقع أثناء استخراج الصوت: ${e.message}"
+            Log.e("DownloadService", errMsg, e)
+            downloadRepository.update(
+                download.copy(
+                    status = DownloadStatus.FAILED,
+                    errorMessage = errMsg
+                )
+            )
+            showErrorNotification(download.id.toInt(), download.title, errMsg)
         }
     }
 

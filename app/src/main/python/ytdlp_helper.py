@@ -129,11 +129,14 @@ def convert_vtt_to_srt(vtt_path):
     except Exception as e:
         return {"error": f"فشل تحويل srt: {str(e)}"}
 
-def extract_info(url, logger_callback=None):
+def extract_info(url, logger_callback=None, cookie_file=None):
     ydl_opts = {
         'skip_download': True,
         'extract_flat': False,
     }
+    if cookie_file:
+        ydl_opts['cookiefile'] = cookie_file
+
     if logger_callback:
         ydl_opts['logger'] = YtDlpLogger(logger_callback)
     else:
@@ -195,7 +198,7 @@ def extract_info(url, logger_callback=None):
     except Exception as e:
         return {"error": str(e)}
 
-def download_video(url, format_id, output_path, ffmpeg_location, subtitle_lang, sponsorblock_action, sponsorblock_categories, callback, logger_callback=None):
+def download_video(url, format_id, output_path, ffmpeg_location, subtitle_lang, sponsorblock_action, sponsorblock_categories, callback, logger_callback=None, cookie_file=None):
     def hook(d):
         try:
             status = d.get('status', 'downloading')
@@ -221,6 +224,9 @@ def download_video(url, format_id, output_path, ffmpeg_location, subtitle_lang, 
         'progress_hooks': [hook],
         'concurrent_fragment_downloads': 4,
     }
+    
+    if cookie_file:
+        ydl_opts['cookiefile'] = cookie_file
     
     if logger_callback:
         ydl_opts['logger'] = YtDlpLogger(logger_callback)

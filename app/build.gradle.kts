@@ -133,6 +133,12 @@ dependencies {
   // Image Loading: Coil (Requested)
   implementation(libs.coil.compose)
 
+  // DataStore Preferences (Requested)
+  implementation(libs.datastore.preferences)
+
+  // DocumentFile support for SAF
+  implementation("androidx.documentfile:documentfile:1.0.1")
+
   // Unit testing
   testImplementation(libs.junit)
   testImplementation(libs.androidx.junit)

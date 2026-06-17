@@ -11,7 +11,7 @@ import javax.inject.Singleton
 
 @Module
 @InstallIn(SingletonComponent::class)
-object DatabaseModule {
+object AppModule {
 
     @Provides
     @Singleton
@@ -20,11 +20,26 @@ object DatabaseModule {
             context,
             AppDatabase::class.java,
             "pure_download_db"
-        ).build()
+        )
+        .fallbackToDestructiveMigration()
+        .build()
     }
 
     @Provides
+    @Singleton
     fun provideDownloadDao(database: AppDatabase): DownloadDao {
         return database.downloadDao()
+    }
+
+    @Provides
+    @Singleton
+    fun provideSettingsManager(@ApplicationContext context: Context): SettingsManager {
+        return SettingsManager(context)
+    }
+
+    @Provides
+    @Singleton
+    fun provideYtdlpEngine(@ApplicationContext context: Context): YtdlpEngine {
+        return YtdlpEngine(context)
     }
 }

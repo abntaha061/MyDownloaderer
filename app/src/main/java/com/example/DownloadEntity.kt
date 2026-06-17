@@ -23,5 +23,6 @@ data class DownloadEntity(
     val createdAt: Long,
     val subtitleLang: String? = null,
     val sponsorblockAction: String = "none",
-    val sponsorblockCategories: String = "" // comma-separated strings
+    val sponsorblockCategories: String = "", // comma-separated strings
+    val convertToMp3: Boolean = false
 )

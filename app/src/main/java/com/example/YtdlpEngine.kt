@@ -79,7 +79,10 @@ class YtdlpEngine @Inject constructor(
                     TerminalLogManager.log(level, message)
                 }
             }
-            val pyResult = helper.callAttr("extract_info", url, pyLogger)
+            val cookiesFile = File(context.filesDir, "cookies.txt")
+            val cookiesPath = if (cookiesFile.exists()) cookiesFile.absolutePath else null
+
+            val pyResult = helper.callAttr("extract_info", url, pyLogger, cookiesPath)
 
             val error = pyResult.get("error")?.toString()
             if (!error.isNullOrEmpty()) {
@@ -173,6 +176,9 @@ class YtdlpEngine @Inject constructor(
                 }
             }
 
+            val cookiesFile = File(context.filesDir, "cookies.txt")
+            val cookiesPath = if (cookiesFile.exists()) cookiesFile.absolutePath else null
+
             val pyResult = helper.callAttr(
                 "download_video",
                 url,
@@ -183,7 +189,8 @@ class YtdlpEngine @Inject constructor(
                 sponsorblockAction,
                 sponsorblockCategories.toList(),
                 progressListener,
-                pyLogger
+                pyLogger,
+                cookiesPath
             )
 
             val error = pyResult.get("error")?.toString()
@@ -194,6 +201,20 @@ class YtdlpEngine @Inject constructor(
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(Exception("خطأ غير متوقع أثناء عملية التحميل: ${e.message}", e))
+        }
+    }
+
+    /**
+     * Reads the current bundled version of yt-dlp from the python environment
+     */
+    fun getYtdlpVersion(): String {
+        return try {
+            if (!Python.isStarted()) return "غير مفعل"
+            val py = Python.getInstance()
+            val versionModule = py.getModule("yt_dlp.version")
+            versionModule.get("__version__")?.toString() ?: "غير معروف"
+        } catch (e: Exception) {
+            "مجهول"
         }
     }
 }
