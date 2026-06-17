@@ -29,6 +29,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
@@ -103,7 +104,7 @@ class ShareReceiverActivity : ComponentActivity() {
                 ShareSheetContainer(
                     state = state,
                     onDismiss = { finish() },
-                    onStartDownload = { formatId, ext, subtitleLang, sponsorblockAction, sponsorblockCategories ->
+                    onStartDownload = { formatId, ext, subtitleLang, sponsorblockAction, sponsorblockCategories, scheduledAt ->
                         val successState = state as? ShareSheetState.Success
                         if (successState != null) {
                             triggerDownload(
@@ -113,7 +114,8 @@ class ShareReceiverActivity : ComponentActivity() {
                                 subtitleLang = subtitleLang,
                                 sponsorblockAction = sponsorblockAction,
                                 sponsorblockCategories = sponsorblockCategories,
-                                videoInfo = successState.info
+                                videoInfo = successState.info,
+                                scheduledAt = scheduledAt
                             )
                         }
                     },
@@ -143,7 +145,8 @@ class ShareReceiverActivity : ComponentActivity() {
         subtitleLang: String?,
         sponsorblockAction: String,
         sponsorblockCategories: Set<String>,
-        videoInfo: VideoInfo
+        videoInfo: VideoInfo,
+        scheduledAt: Long?
     ) {
         lifecycleScope.launch {
             try {
@@ -155,13 +158,14 @@ class ShareReceiverActivity : ComponentActivity() {
                 // Convert categories to comma-separated string
                 val categoriesStr = sponsorblockCategories.joinToString(",")
 
+                val isScheduled = scheduledAt != null
                 val entity = DownloadEntity(
                     url = url,
                     title = videoInfo.title,
                     thumbnailUrl = videoInfo.thumbnailUrl,
                     filePath = outputFile.absolutePath,
                     formatId = formatId,
-                    status = DownloadStatus.QUEUED,
+                    status = if (isScheduled) DownloadStatus.SCHEDULED else DownloadStatus.QUEUED,
                     progressPercent = 0f,
                     downloadedBytes = 0L,
                     totalBytes = 0L,
@@ -169,25 +173,31 @@ class ShareReceiverActivity : ComponentActivity() {
                     createdAt = System.currentTimeMillis(),
                     subtitleLang = subtitleLang,
                     sponsorblockAction = sponsorblockAction,
-                    sponsorblockCategories = categoriesStr
+                    sponsorblockCategories = categoriesStr,
+                    scheduledAt = scheduledAt
                 )
 
                 // Save record in the persistent DB
                 val downloadId = downloadRepository.insert(entity)
 
-                // Fire Foreground service
-                val serviceIntent = Intent(this@ShareReceiverActivity, DownloadService::class.java).apply {
-                    action = DownloadService.ACTION_START_DOWNLOAD
-                    putExtra(DownloadService.EXTRA_DOWNLOAD_ID, downloadId)
-                }
-
-                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-                    startForegroundService(serviceIntent)
+                if (isScheduled) {
+                    DownloadSchedulerHelper.scheduleAlarm(this@ShareReceiverActivity, downloadId, scheduledAt!!)
+                    Toast.makeText(this@ShareReceiverActivity, "تمت جدولة التحميل بنجاح في الوقت المحدد 📅", Toast.LENGTH_SHORT).show()
                 } else {
-                    startService(serviceIntent)
-                }
+                    // Fire Foreground service
+                    val serviceIntent = Intent(this@ShareReceiverActivity, DownloadService::class.java).apply {
+                        action = DownloadService.ACTION_START_DOWNLOAD
+                        putExtra(DownloadService.EXTRA_DOWNLOAD_ID, downloadId)
+                    }
 
-                Toast.makeText(this@ShareReceiverActivity, "تمت إضافة الفيديو إلى قائمة الانتظار للتحميل ⚡", Toast.LENGTH_SHORT).show()
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                        startForegroundService(serviceIntent)
+                    } else {
+                        startService(serviceIntent)
+                    }
+
+                    Toast.makeText(this@ShareReceiverActivity, "تمت إضافة الفيديو إلى قائمة الانتظار للتحميل ⚡", Toast.LENGTH_SHORT).show()
+                }
             } catch (e: Exception) {
                 Log.e("PureDownload", "فشل بدء التحميل: ${e.message}", e)
                 Toast.makeText(this@ShareReceiverActivity, "حدث خطأ غير متوقع أثناء تسجيل التحميل", Toast.LENGTH_LONG).show()
@@ -255,7 +265,7 @@ class ShareReceiverActivity : ComponentActivity() {
 fun ShareSheetContainer(
     state: ShareSheetState,
     onDismiss: () -> Unit,
-    onStartDownload: (formatId: String, ext: String, subtitleLang: String?, sponsorblockAction: String, sponsorblockCategories: Set<String>) -> Unit,
+    onStartDownload: (formatId: String, ext: String, subtitleLang: String?, sponsorblockAction: String, sponsorblockCategories: Set<String>, scheduledAt: Long?) -> Unit,
     onStartPlaylistDownloads: (items: List<Triple<PlaylistEntry, String, Boolean>>) -> Unit
 ) {
     ModalBottomSheet(
@@ -298,8 +308,8 @@ fun ShareSheetContainer(
                         VideoDetailsContentLayout(
                             url = state.url,
                             videoInfo = state.info,
-                            onStartDownload = { formatId, ext, sub, sbAction, sbCats ->
-                                onStartDownload(formatId, ext, sub, sbAction, sbCats)
+                            onStartDownload = { formatId, ext, sub, sbAction, sbCats, scheduledAt ->
+                                onStartDownload(formatId, ext, sub, sbAction, sbCats, scheduledAt)
                                 onDismiss()
                             }
                         )
@@ -491,7 +501,7 @@ fun CustomPillSelector(
 fun VideoDetailsContentLayout(
     url: String,
     videoInfo: VideoInfo,
-    onStartDownload: (formatId: String, ext: String, subtitleLang: String?, sponsorblockAction: String, sponsorblockCategories: Set<String>) -> Unit
+    onStartDownload: (formatId: String, ext: String, subtitleLang: String?, sponsorblockAction: String, sponsorblockCategories: Set<String>, scheduledAt: Long?) -> Unit
 ) {
     var selectedFormat by remember { mutableStateOf<FormatInfo?>(null) }
     var expandedMergedVideo by remember { mutableStateOf(true) } 
@@ -502,6 +512,8 @@ fun VideoDetailsContentLayout(
     var selectedSubtitleLang by remember { mutableStateOf<String?>(null) }
     var sponsorblockAction by remember { mutableStateOf("none") } // none, mark, remove
     var selectedSponsorblockCategories by remember { mutableStateOf(setOf<String>()) }
+    var isScheduled by remember { mutableStateOf(false) }
+    var scheduledAtMs by remember { mutableStateOf<Long?>(null) }
 
     val allFormats = videoInfo.formats
 
@@ -869,6 +881,135 @@ fun VideoDetailsContentLayout(
                         }
                     }
 
+                    Divider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.12f), modifier = Modifier.padding(bottom = 16.dp))
+
+                    // Scheduling Section
+                    Text(
+                        text = "جدولة التحميل بوقت لاحق:",
+                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
+
+                    val context = LocalContext.current
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = "تفعيل المنبه/الجدولة لتمكين التحميل لاحقاً",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Switch(
+                            checked = isScheduled,
+                            onCheckedChange = { checked ->
+                                isScheduled = checked
+                                if (!checked) {
+                                    scheduledAtMs = null
+                                } else {
+                                    // auto-trigger date selection when turning on
+                                    val calendar = java.util.Calendar.getInstance()
+                                    android.app.DatePickerDialog(
+                                        context,
+                                        { _, year, month, day ->
+                                            android.app.TimePickerDialog(
+                                                context,
+                                                { _, hour, min ->
+                                                    val selectedCal = java.util.Calendar.getInstance().apply {
+                                                        set(java.util.Calendar.YEAR, year)
+                                                        set(java.util.Calendar.MONTH, month)
+                                                        set(java.util.Calendar.DAY_OF_MONTH, day)
+                                                        set(java.util.Calendar.HOUR_OF_DAY, hour)
+                                                        set(java.util.Calendar.MINUTE, min)
+                                                        set(java.util.Calendar.SECOND, 0)
+                                                        set(java.util.Calendar.MILLISECOND, 0)
+                                                    }
+                                                    if (selectedCal.timeInMillis > System.currentTimeMillis()) {
+                                                        scheduledAtMs = selectedCal.timeInMillis
+                                                    } else {
+                                                        isScheduled = false
+                                                        Toast.makeText(context, "الرجاء اختيار وقت مستقبلي!", Toast.LENGTH_SHORT).show()
+                                                    }
+                                                },
+                                                calendar.get(java.util.Calendar.HOUR_OF_DAY),
+                                                calendar.get(java.util.Calendar.MINUTE),
+                                                false
+                                            ).show()
+                                        },
+                                        calendar.get(java.util.Calendar.YEAR),
+                                        calendar.get(java.util.Calendar.MONTH),
+                                        calendar.get(java.util.Calendar.DAY_OF_MONTH)
+                                    ).show()
+                                }
+                            }
+                        )
+                    }
+
+                    if (isScheduled && scheduledAtMs != null) {
+                        val formattedDate = remember(scheduledAtMs) {
+                            val sdf = java.text.SimpleDateFormat("yyyy/MM/dd hh:mm a", java.util.Locale.getDefault())
+                            sdf.format(java.util.Date(scheduledAtMs!!))
+                        }
+                        
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(bottom = 12.dp)
+                                .clickable {
+                                    val calendar = java.util.Calendar.getInstance()
+                                    android.app.DatePickerDialog(
+                                        context,
+                                        { _, year, month, day ->
+                                            android.app.TimePickerDialog(
+                                                context,
+                                                { _, hour, min ->
+                                                    val selectedCal = java.util.Calendar.getInstance().apply {
+                                                        set(java.util.Calendar.YEAR, year)
+                                                        set(java.util.Calendar.MONTH, month)
+                                                        set(java.util.Calendar.DAY_OF_MONTH, day)
+                                                        set(java.util.Calendar.HOUR_OF_DAY, hour)
+                                                        set(java.util.Calendar.MINUTE, min)
+                                                        set(java.util.Calendar.SECOND, 0)
+                                                        set(java.util.Calendar.MILLISECOND, 0)
+                                                    }
+                                                    if (selectedCal.timeInMillis > System.currentTimeMillis()) {
+                                                        scheduledAtMs = selectedCal.timeInMillis
+                                                    } else {
+                                                        Toast.makeText(context, "الرجاء اختيار وقت مستقبلي!", Toast.LENGTH_SHORT).show()
+                                                    }
+                                                },
+                                                calendar.get(java.util.Calendar.HOUR_OF_DAY),
+                                                calendar.get(java.util.Calendar.MINUTE),
+                                                false
+                                            ).show()
+                                        },
+                                        calendar.get(java.util.Calendar.YEAR),
+                                        calendar.get(java.util.Calendar.MONTH),
+                                        calendar.get(java.util.Calendar.DAY_OF_MONTH)
+                                    ).show()
+                                },
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)),
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(Icons.Rounded.Schedule, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                                Text(
+                                    text = "الوقت المجدول: $formattedDate",
+                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        }
+                    }
+
                     // Alert Disclaimer Card
                     Card(
                         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
@@ -916,7 +1057,8 @@ fun VideoDetailsContentLayout(
                             it.ext,
                             selectedSubtitleLang,
                             sponsorblockAction,
-                            selectedSponsorblockCategories
+                            selectedSponsorblockCategories,
+                            if (isScheduled) scheduledAtMs else null
                         )
                     }
                 },

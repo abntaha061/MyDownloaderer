@@ -266,6 +266,9 @@ fun HistoryScreen(
                 Button(
                     onClick = {
                         coroutineScope.launch {
+                            if (target.status == DownloadStatus.SCHEDULED) {
+                                DownloadSchedulerHelper.cancelAlarm(context, target.id)
+                            }
                             // Delete record only
                             downloadRepository.deleteById(target.id)
                             showDeleteDialog = false
@@ -283,6 +286,9 @@ fun HistoryScreen(
                 Button(
                     onClick = {
                         coroutineScope.launch {
+                            if (target.status == DownloadStatus.SCHEDULED) {
+                                DownloadSchedulerHelper.cancelAlarm(context, target.id)
+                            }
                             // Delete record & local storage file
                             try {
                                 val file = File(target.filePath)
@@ -371,6 +377,7 @@ fun HistoryCardItem(
         DownloadStatus.COMPLETED -> Color(0xFF4CAF50)
         DownloadStatus.FAILED -> MaterialTheme.colorScheme.error
         DownloadStatus.PAUSED -> MaterialTheme.colorScheme.secondary
+        DownloadStatus.SCHEDULED -> MaterialTheme.colorScheme.tertiary
     }
 
     val statusLabel = when (download.status) {
@@ -378,7 +385,15 @@ fun HistoryCardItem(
         DownloadStatus.RUNNING -> "جاري التحميل"
         DownloadStatus.COMPLETED -> "اكتمل بنجاح"
         DownloadStatus.FAILED -> "فشل التحميل"
-        DownloadStatus.PAUSED -> "موؤقت"
+        DownloadStatus.PAUSED -> "موقت"
+        DownloadStatus.SCHEDULED -> {
+            if (download.scheduledAt != null) {
+                val sdf = java.text.SimpleDateFormat("yyyy/MM/dd hh:mm a", java.util.Locale.getDefault())
+                "مجدول لـ ${sdf.format(java.util.Date(download.scheduledAt))}"
+            } else {
+                "مجدول"
+            }
+        }
     }
 
     Card(

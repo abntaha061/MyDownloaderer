@@ -4,7 +4,7 @@ import androidx.room.Entity
 import androidx.room.PrimaryKey
 
 enum class DownloadStatus {
-    QUEUED, RUNNING, PAUSED, COMPLETED, FAILED
+    QUEUED, RUNNING, PAUSED, COMPLETED, FAILED, SCHEDULED
 }
 
 @Entity(tableName = "downloads")
@@ -24,5 +24,6 @@ data class DownloadEntity(
     val subtitleLang: String? = null,
     val sponsorblockAction: String = "none",
     val sponsorblockCategories: String = "", // comma-separated strings
-    val convertToMp3: Boolean = false
+    val convertToMp3: Boolean = false,
+    val scheduledAt: Long? = null
 )

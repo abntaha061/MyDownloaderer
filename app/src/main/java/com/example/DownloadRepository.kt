@@ -10,6 +10,10 @@ class DownloadRepository @Inject constructor(
 ) {
     val allDownloads: Flow<List<DownloadEntity>> = downloadDao.getAllAsFlow()
 
+    suspend fun getAllOnce(): List<DownloadEntity> {
+        return downloadDao.getAllOnce()
+    }
+
     suspend fun insert(download: DownloadEntity): Long {
         return downloadDao.insert(download)
     }
