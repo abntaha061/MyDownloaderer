@@ -21,6 +21,11 @@ jobs:
         distribution: 'temurin'
         cache: gradle
 
+    - name: Set up Python 3.10
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+
     # الخطوة الجديدة: إنشاء ملف debug.keystore وهمي لتجاوز خطأ التوقيع
     - name: Generate debug keystore
       run: |
