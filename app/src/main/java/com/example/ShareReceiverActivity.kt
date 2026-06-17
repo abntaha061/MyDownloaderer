@@ -7,6 +7,7 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.lifecycle.lifecycleScope
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
@@ -52,6 +53,9 @@ class ShareReceiverActivity : ComponentActivity() {
 
     @Inject
     lateinit var ytdlpEngine: YtdlpEngine
+
+    @Inject
+    lateinit var downloadRepository: DownloadRepository
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -99,7 +103,18 @@ class ShareReceiverActivity : ComponentActivity() {
                     state = state,
                     onDismiss = { finish() },
                     onStartDownload = { formatId, ext, subtitleLang, sponsorblockAction, sponsorblockCategories ->
-                        triggerDownload(url, formatId, ext, subtitleLang, sponsorblockAction, sponsorblockCategories)
+                        val successState = state as? ShareSheetState.Success
+                        if (successState != null) {
+                            triggerDownload(
+                                url = url,
+                                formatId = formatId,
+                                ext = ext,
+                                subtitleLang = subtitleLang,
+                                sponsorblockAction = sponsorblockAction,
+                                sponsorblockCategories = sponsorblockCategories,
+                                videoInfo = successState.info
+                            )
+                        }
                     }
                 )
             }
@@ -123,11 +138,57 @@ class ShareReceiverActivity : ComponentActivity() {
         ext: String,
         subtitleLang: String?,
         sponsorblockAction: String,
-        sponsorblockCategories: Set<String>
+        sponsorblockCategories: Set<String>,
+        videoInfo: VideoInfo
     ) {
-        Toast.makeText(this, "بدء تحميل الجودة: $formatId", Toast.LENGTH_SHORT).show()
-        Log.d("PureDownload", "جرى طلب التحميل: URL=$url, Format=$formatId, Ext=$ext, Sub=$subtitleLang, SB_Action=$sponsorblockAction, SB_Categories=$sponsorblockCategories")
-        // Note: The physical download service integration will hook up to these options dynamically
+        lifecycleScope.launch {
+            try {
+                // Sanitize file name for file system safety
+                val cleanTitle = videoInfo.title.replace("[\\\\/:*?\"<>|]".toRegex(), "_")
+                val downloadsDir = getExternalFilesDir(android.os.Environment.DIRECTORY_DOWNLOADS) ?: filesDir
+                val outputFile = java.io.File(downloadsDir, "$cleanTitle.$ext")
+
+                // Convert categories to comma-separated string
+                val categoriesStr = sponsorblockCategories.joinToString(",")
+
+                val entity = DownloadEntity(
+                    url = url,
+                    title = videoInfo.title,
+                    thumbnailUrl = videoInfo.thumbnailUrl,
+                    filePath = outputFile.absolutePath,
+                    formatId = formatId,
+                    status = DownloadStatus.QUEUED,
+                    progressPercent = 0f,
+                    downloadedBytes = 0L,
+                    totalBytes = 0L,
+                    errorMessage = null,
+                    createdAt = System.currentTimeMillis(),
+                    subtitleLang = subtitleLang,
+                    sponsorblockAction = sponsorblockAction,
+                    sponsorblockCategories = categoriesStr
+                )
+
+                // Save record in the persistent DB
+                val downloadId = downloadRepository.insert(entity)
+
+                // Fire Foreground service
+                val serviceIntent = Intent(this@ShareReceiverActivity, DownloadService::class.java).apply {
+                    action = DownloadService.ACTION_START_DOWNLOAD
+                    putExtra(DownloadService.EXTRA_DOWNLOAD_ID, downloadId)
+                }
+
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                    startForegroundService(serviceIntent)
+                } else {
+                    startService(serviceIntent)
+                }
+
+                Toast.makeText(this@ShareReceiverActivity, "تمت إضافة الفيديو إلى قائمة الانتظار للتحميل ⚡", Toast.LENGTH_SHORT).show()
+            } catch (e: Exception) {
+                Log.e("PureDownload", "فشل بدء التحميل: ${e.message}", e)
+                Toast.makeText(this@ShareReceiverActivity, "حدث خطأ غير متوقع أثناء تسجيل التحميل", Toast.LENGTH_LONG).show()
+            }
+        }
     }
 }
 

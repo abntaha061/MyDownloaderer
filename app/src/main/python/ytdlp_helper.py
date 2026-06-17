@@ -4,6 +4,38 @@ import traceback
 import re
 import os
 
+class YtDlpLogger:
+    def __init__(self, callback):
+        self.callback = callback
+    
+    def debug(self, msg):
+        if self.callback:
+            try:
+                self.callback.log("DEBUG", msg)
+            except Exception:
+                pass
+
+    def info(self, msg):
+        if self.callback:
+            try:
+                self.callback.log("INFO", msg)
+            except Exception:
+                pass
+
+    def warning(self, msg):
+        if self.callback:
+            try:
+                self.callback.log("WARNING", msg)
+            except Exception:
+                pass
+
+    def error(self, msg):
+        if self.callback:
+            try:
+                self.callback.log("ERROR", msg)
+            except Exception:
+                pass
+
 def convert_vtt_to_srt(vtt_path):
     try:
         if not os.path.exists(vtt_path):
@@ -97,13 +129,17 @@ def convert_vtt_to_srt(vtt_path):
     except Exception as e:
         return {"error": f"فشل تحويل srt: {str(e)}"}
 
-def extract_info(url):
+def extract_info(url, logger_callback=None):
     ydl_opts = {
-        'quiet': True,
-        'no_warnings': True,
         'skip_download': True,
         'extract_flat': False,
     }
+    if logger_callback:
+        ydl_opts['logger'] = YtDlpLogger(logger_callback)
+    else:
+        ydl_opts['quiet'] = True
+        ydl_opts['no_warnings'] = True
+        
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
@@ -159,7 +195,7 @@ def extract_info(url):
     except Exception as e:
         return {"error": str(e)}
 
-def download_video(url, format_id, output_path, ffmpeg_location, subtitle_lang, sponsorblock_action, sponsorblock_categories, callback):
+def download_video(url, format_id, output_path, ffmpeg_location, subtitle_lang, sponsorblock_action, sponsorblock_categories, callback, logger_callback=None):
     def hook(d):
         try:
             status = d.get('status', 'downloading')
@@ -183,9 +219,14 @@ def download_video(url, format_id, output_path, ffmpeg_location, subtitle_lang, 
         'format': format_id,
         'outtmpl': output_path,
         'progress_hooks': [hook],
-        'quiet': True,
-        'no_warnings': True,
+        'concurrent_fragment_downloads': 4,
     }
+    
+    if logger_callback:
+        ydl_opts['logger'] = YtDlpLogger(logger_callback)
+    else:
+        ydl_opts['quiet'] = True
+        ydl_opts['no_warnings'] = True
     
     if ffmpeg_location:
         ydl_opts['ffmpeg_location'] = ffmpeg_location

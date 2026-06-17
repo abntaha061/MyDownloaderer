@@ -18,6 +18,10 @@ interface DownloadProgressListener {
     fun onProgress(status: String, downloadedBytes: Long, totalBytes: Long, speed: Double, eta: Long)
 }
 
+interface PyLogger {
+    fun log(level: String, message: String)
+}
+
 data class DownloadProgress(
     val status: String,
     val downloadedBytes: Long,
@@ -70,7 +74,12 @@ class YtdlpEngine @Inject constructor(
 
             val py = Python.getInstance()
             val helper = py.getModule("ytdlp_helper")
-            val pyResult = helper.callAttr("extract_info", url)
+            val pyLogger = object : PyLogger {
+                override fun log(level: String, message: String) {
+                    TerminalLogManager.log(level, message)
+                }
+            }
+            val pyResult = helper.callAttr("extract_info", url, pyLogger)
 
             val error = pyResult.get("error")?.toString()
             if (!error.isNullOrEmpty()) {
@@ -158,6 +167,12 @@ class YtdlpEngine @Inject constructor(
                 }
             }
 
+            val pyLogger = object : PyLogger {
+                override fun log(level: String, message: String) {
+                    TerminalLogManager.log(level, message)
+                }
+            }
+
             val pyResult = helper.callAttr(
                 "download_video",
                 url,
@@ -167,7 +182,8 @@ class YtdlpEngine @Inject constructor(
                 subtitleLang,
                 sponsorblockAction,
                 sponsorblockCategories.toList(),
-                progressListener
+                progressListener,
+                pyLogger
             )
 
             val error = pyResult.get("error")?.toString()
