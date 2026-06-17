@@ -93,21 +93,21 @@ class YtdlpEngine @Inject constructor(
 
             val pyResult = helper.callAttr("extract_info", url, pyLogger, cookiesPath)
 
-            val error = pyResult.get("error")?.toString()
+            val error = pyResult.item("error")?.toString()
             if (!error.isNullOrEmpty()) {
                 return@withContext Result.failure(Exception("خطأ من yt-dlp: $error"))
             }
 
-            val typeStr = pyResult.get("_type")?.toString()
+            val typeStr = pyResult.item("_type")?.toString()
             if (typeStr == "playlist") {
-                val title = pyResult.get("title")?.toString() ?: "قائمة تشغيل غير معروفة"
-                val entriesPyList = pyResult.get("entries")?.asList() ?: emptyList()
+                val title = pyResult.item("title")?.toString() ?: "قائمة تشغيل غير معروفة"
+                val entriesPyList = pyResult.item("entries")?.asList() ?: emptyList()
                 val entries = entriesPyList.map { entryObj ->
                     PlaylistEntry(
-                        title = entryObj.get("title")?.toString() ?: "فيديو غير معروف",
-                        url = entryObj.get("url")?.toString() ?: "",
-                        duration = entryObj.get("duration")?.toInt() ?: 0,
-                        thumbnailUrl = entryObj.get("thumbnail")?.toString() ?: ""
+                        title = entryObj.item("title")?.toString() ?: "فيديو غير معروف",
+                        url = entryObj.item("url")?.toString() ?: "",
+                        duration = entryObj.item("duration")?.toInt() ?: 0,
+                        thumbnailUrl = entryObj.item("thumbnail")?.toString() ?: ""
                     )
                 }
                 return@withContext Result.success(
@@ -123,28 +123,28 @@ class YtdlpEngine @Inject constructor(
                 )
             }
 
-            val title = pyResult.get("title")?.toString() ?: "عنوان غير معروف"
-            val duration = pyResult.get("duration")?.toInt() ?: 0
-            val thumbnailUrl = pyResult.get("thumbnail")?.toString() ?: ""
-            val formatsPyList = pyResult.get("formats")?.asList() ?: emptyList()
-            val subtitlesPyList = pyResult.get("subtitles")?.asList() ?: emptyList()
+            val title = pyResult.item("title")?.toString() ?: "عنوان غير معروف"
+            val duration = pyResult.item("duration")?.toInt() ?: 0
+            val thumbnailUrl = pyResult.item("thumbnail")?.toString() ?: ""
+            val formatsPyList = pyResult.item("formats")?.asList() ?: emptyList()
+            val subtitlesPyList = pyResult.item("subtitles")?.asList() ?: emptyList()
 
             val formats = formatsPyList.map { formatObj ->
                 FormatInfo(
-                    formatId = formatObj.get("format_id")?.toString() ?: "",
-                    ext = formatObj.get("ext")?.toString() ?: "",
-                    resolution = formatObj.get("resolution")?.toString() ?: "",
-                    filesizeApprox = formatObj.get("filesize_approx")?.toLong() ?: 0L,
-                    acodec = formatObj.get("acodec")?.toString() ?: "",
-                    vcodec = formatObj.get("vcodec")?.toString() ?: ""
+                    formatId = formatObj.item("format_id")?.toString() ?: "",
+                    ext = formatObj.item("ext")?.toString() ?: "",
+                    resolution = formatObj.item("resolution")?.toString() ?: "",
+                    filesizeApprox = formatObj.item("filesize_approx")?.toLong() ?: 0L,
+                    acodec = formatObj.item("acodec")?.toString() ?: "",
+                    vcodec = formatObj.item("vcodec")?.toString() ?: ""
                 )
             }
 
             val subtitles = subtitlesPyList.map { subObj ->
                 SubtitleInfo(
-                    code = subObj.get("code")?.toString() ?: "",
-                    name = subObj.get("name")?.toString() ?: "",
-                    type = subObj.get("type")?.toString() ?: ""
+                    code = subObj.item("code")?.toString() ?: "",
+                    name = subObj.item("name")?.toString() ?: "",
+                    type = subObj.item("type")?.toString() ?: ""
                 )
             }
 
@@ -227,7 +227,7 @@ class YtdlpEngine @Inject constructor(
                 cookiesPath
             )
 
-            val error = pyResult.get("error")?.toString()
+            val error = pyResult.item("error")?.toString()
             if (!error.isNullOrEmpty()) {
                 return@withContext Result.failure(Exception("توقف التحميل بسبب خطأ: $error"))
             }
@@ -252,3 +252,5 @@ class YtdlpEngine @Inject constructor(
         }
     }
 }
+
+private fun PyObject.item(key: String): PyObject? = this.callAttr("get", key)

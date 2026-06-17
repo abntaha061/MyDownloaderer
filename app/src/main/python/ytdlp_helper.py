@@ -271,6 +271,12 @@ def download_video(url, format_id, output_path, ffmpeg_location, subtitle_lang, 
     elif sponsorblock_action == 'remove' and sponsorblock_categories:
         ydl_opts['sponsorblock_remove'] = list(sponsorblock_categories)
 
+    ydl_opts['writethumbnail'] = True
+    ydl_opts['postprocessors'] = ydl_opts.get('postprocessors', []) + [
+        {'key': 'FFmpegThumbnailsConvertor', 'format': 'jpg'},
+        {'key': 'EmbedThumbnail'}
+    ]
+
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([url])

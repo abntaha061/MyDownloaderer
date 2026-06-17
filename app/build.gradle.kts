@@ -86,7 +86,7 @@ chaquopy {
   defaultConfig {
     version = "3.10"
     pip {
-      install("yt-dlp==2025.1.26")
+      install("yt-dlp==2026.6.9")
       install("certifi==2025.1.31")
       install("brotli==1.0.7")
       install("websockets==14.1")
