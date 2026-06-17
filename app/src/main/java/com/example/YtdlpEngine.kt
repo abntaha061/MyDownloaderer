@@ -35,7 +35,16 @@ data class VideoInfo(
     val duration: Int,
     val thumbnailUrl: String,
     val formats: List<FormatInfo>,
-    val subtitles: List<SubtitleInfo>
+    val subtitles: List<SubtitleInfo>,
+    val isPlaylist: Boolean = false,
+    val playlistEntries: List<PlaylistEntry> = emptyList()
+)
+
+data class PlaylistEntry(
+    val title: String,
+    val url: String,
+    val duration: Int,
+    val thumbnailUrl: String
 )
 
 data class FormatInfo(
@@ -87,6 +96,31 @@ class YtdlpEngine @Inject constructor(
             val error = pyResult.get("error")?.toString()
             if (!error.isNullOrEmpty()) {
                 return@withContext Result.failure(Exception("خطأ من yt-dlp: $error"))
+            }
+
+            val typeStr = pyResult.get("_type")?.toString()
+            if (typeStr == "playlist") {
+                val title = pyResult.get("title")?.toString() ?: "قائمة تشغيل غير معروفة"
+                val entriesPyList = pyResult.get("entries")?.asList() ?: emptyList()
+                val entries = entriesPyList.map { entryObj ->
+                    PlaylistEntry(
+                        title = entryObj.get("title")?.toString() ?: "فيديو غير معروف",
+                        url = entryObj.get("url")?.toString() ?: "",
+                        duration = entryObj.get("duration")?.toInt() ?: 0,
+                        thumbnailUrl = entryObj.get("thumbnail")?.toString() ?: ""
+                    )
+                }
+                return@withContext Result.success(
+                    VideoInfo(
+                        title = title,
+                        duration = 0,
+                        thumbnailUrl = entries.firstOrNull()?.thumbnailUrl ?: "",
+                        formats = emptyList(),
+                        subtitles = emptyList(),
+                        isPlaylist = true,
+                        playlistEntries = entries
+                    )
+                )
             }
 
             val title = pyResult.get("title")?.toString() ?: "عنوان غير معروف"

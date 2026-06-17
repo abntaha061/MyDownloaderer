@@ -19,6 +19,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -115,6 +116,9 @@ class ShareReceiverActivity : ComponentActivity() {
                                 videoInfo = successState.info
                             )
                         }
+                    },
+                    onStartPlaylistDownloads = { items ->
+                        triggerPlaylistDownloads(items)
                     }
                 )
             }
@@ -190,6 +194,60 @@ class ShareReceiverActivity : ComponentActivity() {
             }
         }
     }
+
+    private fun triggerPlaylistDownloads(
+        items: List<Triple<PlaylistEntry, String, Boolean>>
+    ) {
+        lifecycleScope.launch {
+            try {
+                val downloadsDir = getExternalFilesDir(android.os.Environment.DIRECTORY_DOWNLOADS) ?: filesDir
+                var firstId: Long? = null
+
+                items.forEach { (entry, ext, convertToMp3) ->
+                    val cleanTitle = entry.title.replace("[\\\\/:*?\"<>|]".toRegex(), "_")
+                    val outputFile = java.io.File(downloadsDir, "$cleanTitle.$ext")
+
+                    val entity = DownloadEntity(
+                        url = entry.url,
+                        title = entry.title,
+                        thumbnailUrl = entry.thumbnailUrl,
+                        filePath = outputFile.absolutePath,
+                        formatId = if (convertToMp3) "bestaudio" else "best",
+                        status = DownloadStatus.QUEUED,
+                        progressPercent = 0f,
+                        downloadedBytes = 0L,
+                        totalBytes = 0L,
+                        errorMessage = null,
+                        createdAt = System.currentTimeMillis(),
+                        convertToMp3 = convertToMp3
+                    )
+
+                    val downloadId = downloadRepository.insert(entity)
+                    if (firstId == null) {
+                        firstId = downloadId
+                    }
+                }
+
+                firstId?.let { downloadId ->
+                    val serviceIntent = Intent(this@ShareReceiverActivity, DownloadService::class.java).apply {
+                        action = DownloadService.ACTION_START_DOWNLOAD
+                        putExtra(DownloadService.EXTRA_DOWNLOAD_ID, downloadId)
+                    }
+
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                        startForegroundService(serviceIntent)
+                    } else {
+                        startService(serviceIntent)
+                    }
+                }
+
+                Toast.makeText(this@ShareReceiverActivity, "تمت إضافة ${items.size} ملفات إلى قائمة التحميل بنجاح ⚡", Toast.LENGTH_SHORT).show()
+            } catch (e: Exception) {
+                Log.e("PureDownload", "فشل بدء تحميل قائمة التشغيل: ${e.message}", e)
+                Toast.makeText(this@ShareReceiverActivity, "حدث خطأ أثناء تحميل قائمة التشغيل", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -197,7 +255,8 @@ class ShareReceiverActivity : ComponentActivity() {
 fun ShareSheetContainer(
     state: ShareSheetState,
     onDismiss: () -> Unit,
-    onStartDownload: (formatId: String, ext: String, subtitleLang: String?, sponsorblockAction: String, sponsorblockCategories: Set<String>) -> Unit
+    onStartDownload: (formatId: String, ext: String, subtitleLang: String?, sponsorblockAction: String, sponsorblockCategories: Set<String>) -> Unit,
+    onStartPlaylistDownloads: (items: List<Triple<PlaylistEntry, String, Boolean>>) -> Unit
 ) {
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -225,14 +284,26 @@ fun ShareSheetContainer(
                 }
 
                 is ShareSheetState.Success -> {
-                    VideoDetailsContentLayout(
-                        url = state.url,
-                        videoInfo = state.info,
-                        onStartDownload = { formatId, ext, sub, sbAction, sbCats ->
-                            onStartDownload(formatId, ext, sub, sbAction, sbCats)
-                            onDismiss()
-                        }
-                    )
+                    if (state.info.isPlaylist) {
+                        PlaylistDetailsContentLayout(
+                            playlistTitle = state.info.title,
+                            entries = state.info.playlistEntries,
+                            onDismiss = onDismiss,
+                            onStartPlaylistDownloads = { items ->
+                                onStartPlaylistDownloads(items)
+                                onDismiss()
+                            }
+                        )
+                    } else {
+                        VideoDetailsContentLayout(
+                            url = state.url,
+                            videoInfo = state.info,
+                            onStartDownload = { formatId, ext, sub, sbAction, sbCats ->
+                                onStartDownload(formatId, ext, sub, sbAction, sbCats)
+                                onDismiss()
+                            }
+                        )
+                    }
                 }
             }
         }
@@ -1117,5 +1188,249 @@ fun formatFileSize(bytes: Long): String {
         mcs >= 1.0 -> String.format("%.1f ميجابايت", mcs)
         kcs >= 1.0 -> String.format("%.1f كيلوبايت", kcs)
         else -> "$bytes بايت"
+    }
+}
+
+data class PlaylistTrackState(
+    val entry: PlaylistEntry,
+    val isSelected: Boolean = true,
+    val convertToMp3: Boolean = false
+)
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun PlaylistDetailsContentLayout(
+    playlistTitle: String,
+    entries: List<PlaylistEntry>,
+    onDismiss: () -> Unit,
+    onStartPlaylistDownloads: (items: List<Triple<PlaylistEntry, String, Boolean>>) -> Unit
+) {
+    val trackStates = remember {
+        mutableStateListOf<PlaylistTrackState>().apply {
+            addAll(entries.map { PlaylistTrackState(it) })
+        }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp, vertical = 8.dp)
+            .heightIn(max = 580.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.PlaylistPlay,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(32.dp).padding(end = 8.dp)
+            )
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = playlistTitle,
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 15.sp,
+                        lineHeight = 20.sp
+                    ),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = "${entries.size} فيديو في قائمة التشغيل",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+
+        Divider(color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f), thickness = 1.dp)
+        Spacer(modifier = Modifier.height(12.dp))
+
+        Surface(
+            modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.2f),
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            Column(modifier = Modifier.padding(12.dp)) {
+                Text(
+                    text = "تطبيق الصيغة على كل العناصر:",
+                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Button(
+                        onClick = {
+                            for (i in trackStates.indices) {
+                                trackStates[i] = trackStates[i].copy(convertToMp3 = false)
+                            }
+                        },
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f))
+                    ) {
+                        Icon(Icons.Rounded.Movie, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("فيديو للكل", fontSize = 12.sp)
+                    }
+
+                    Button(
+                        onClick = {
+                            for (i in trackStates.indices) {
+                                trackStates[i] = trackStates[i].copy(convertToMp3 = true)
+                            }
+                        },
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary.copy(alpha = 0.8f))
+                    ) {
+                        Icon(Icons.Rounded.Audiotrack, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("صوت MP3 للكل", fontSize = 12.sp)
+                    }
+                }
+            }
+        }
+
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+            contentPadding = PaddingValues(bottom = 16.dp)
+        ) {
+            itemsIndexed(trackStates) { index, trackState ->
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = if (trackState.isSelected) {
+                            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+                        } else {
+                            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.1f)
+                        }
+                    ),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Checkbox(
+                            checked = trackState.isSelected,
+                            onCheckedChange = { checked ->
+                                trackStates[index] = trackState.copy(isSelected = checked == true)
+                            }
+                        )
+
+                        Card(
+                            modifier = Modifier.size(width = 64.dp, height = 44.dp),
+                            shape = RoundedCornerShape(6.dp)
+                        ) {
+                            SubcomposeAsyncImage(
+                                model = trackState.entry.thumbnailUrl,
+                                contentDescription = null,
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = ContentScale.Crop,
+                                loading = {
+                                    Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surfaceVariant))
+                                }
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.width(10.dp))
+
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = trackState.entry.title,
+                                style = MaterialTheme.typography.bodyMedium.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 13.sp
+                                ),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(top = 2.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = formatDuration(trackState.entry.duration),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    fontSize = 11.sp
+                                )
+
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Text(
+                                        text = if (trackState.convertToMp3) "صوت 🎵" else "فيديو 🎬",
+                                        style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold),
+                                        color = if (trackState.convertToMp3) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.primary,
+                                        fontSize = 11.sp
+                                    )
+                                    IconButton(
+                                        onClick = {
+                                            trackStates[index] = trackState.copy(convertToMp3 = !trackState.convertToMp3)
+                                        },
+                                        modifier = Modifier.size(24.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Rounded.SwapHoriz,
+                                            contentDescription = "تغيير الصيغة",
+                                            modifier = Modifier.size(16.dp),
+                                            tint = MaterialTheme.colorScheme.primary
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        val selectedCount = trackStates.count { it.isSelected }
+        val isEnabled = selectedCount > 0
+
+        Button(
+            onClick = {
+                val downloads = trackStates.filter { it.isSelected }.map {
+                    Triple(it.entry, if (it.convertToMp3) "mp3" else "mp4", it.convertToMp3)
+                }
+                onStartPlaylistDownloads(downloads)
+            },
+            enabled = isEnabled,
+            shape = RoundedCornerShape(14.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .height(52.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Icon(Icons.Rounded.Download, contentDescription = null)
+                Text(
+                    text = if (isEnabled) "تأكيد وتحميل $selectedCount عنصر" else "الرجاء تحديد عنصر واحد على الأقل",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 15.sp
+                )
+            }
+        }
     }
 }

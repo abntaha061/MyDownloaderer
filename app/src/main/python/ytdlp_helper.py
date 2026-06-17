@@ -149,6 +149,26 @@ def extract_info(url, logger_callback=None, cookie_file=None):
             if info is None:
                 return {"error": "فشل استخراج معلومات الفيديو"}
             
+            if info.get('_type') == 'playlist':
+                entries = []
+                for entry in info.get('entries', []):
+                    if not entry:
+                        continue
+                    thumb = entry.get('thumbnail') or ''
+                    if not thumb and entry.get('thumbnails'):
+                        thumb = entry.get('thumbnails')[0].get('url') or ''
+                    entries.append({
+                        'title': entry.get('title', 'فيديو غير معروف') or 'فيديو غير معروف',
+                        'url': entry.get('webpage_url') or entry.get('url') or f"https://www.youtube.com/watch?v={entry.get('id')}",
+                        'duration': int(entry.get('duration') or 0),
+                        'thumbnail': thumb
+                    })
+                return {
+                    "_type": "playlist",
+                    "title": info.get('title', 'قائمة تشغيل غير معروفة') or 'قائمة تشغيل غير معروفة',
+                    "entries": entries
+                }
+            
             # Format formats to a clean Kotlin list
             formats = []
             raw_formats = info.get('formats', [])
