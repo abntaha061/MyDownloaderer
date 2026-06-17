@@ -1,0 +1,93 @@
+# Versions Catalog for PureDownload
+# Each version was chosen based on specific compatibility and stability requirements.
+
+[versions]
+# Android Gradle Plugin 8.7.3: Chosen as a highly stable release matching Gradle 8.9 for modern builds.
+agp = "8.7.3"
+# Kotlin 2.0.21: Sourced as the target platform version supporting the new K2 compiler & Compose plugin.
+kotlin = "2.0.21"
+# KSP 2.0.21-1.0.26: Selected as the exact matching compiler plugin patch release for Kotlin 2.0.21.
+ksp = "2.0.21-1.0.26"
+# Compose BOM 2024.10.01: Incorporated as the latest stable Bill of Materials compatible with Kotlin 2.0.21.
+compose-bom = "2024.10.01"
+# Chaquopy 17.0.0: Sourced as the stable release for Python execution support within Android.
+chaquopy = "17.0.0"
+# Hilt 2.52: Selected as the modern stable standard for Dependency Injection in Android.
+hilt = "2.52"
+# Hilt Navigation Compose 1.2.0: Sourced as the latest stable library compatible with Jetpack Compose & Hilt 2.52.
+hilt-navigation-compose = "1.2.0"
+# Room 2.6.1: Chosen as the stable persistence database release supporting Kotlin Coroutines flow.
+room = "2.6.1"
+# WorkManager 2.9.1: Used as the latest stable 2.9.x patch for deferrable background jobs.
+workmanager = "2.9.1"
+# Navigation Compose 2.8.4: Sourced as the stable version of Jetpack compose navigation compatible with BOM.
+navigation-compose = "2.8.4"
+# Coil 2.7.0: Incorporated as the highly reliable stable image loading engine for Jetpack Compose UI.
+coil = "2.7.0"
+
+# Core Platform Versions (Bare Minimum to make project build)
+# Core KTX 1.13.1: Configured for fundamental library extensions compatible with compile sdk.
+core-ktx = "1.13.1"
+# Lifecycle 2.8.6: Sourced as the stable release for lifecycle state observers and viewmodel support.
+lifecycle = "2.8.6"
+# Activity Compose 1.9.3: Chosen as stable baseline supporting component activity in Jetpack Compose UI.
+activity-compose = "1.9.3"
+
+[libraries]
+# Core Android KTX Library
+core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "core-ktx" }
+# Compose Activity Integration
+activity-compose = { group = "androidx.activity", name = "activity-compose", version.ref = "activity-compose" }
+# Lifecycle integration for ViewModel and Compose
+lifecycle-runtime-ktx = { group = "androidx.lifecycle", name = "lifecycle-runtime-ktx", version.ref = "lifecycle" }
+lifecycle-viewmodel-compose = { group = "androidx.lifecycle", name = "lifecycle-viewmodel-compose", version.ref = "lifecycle" }
+lifecycle-runtime-compose = { group = "androidx.lifecycle", name = "lifecycle-runtime-compose", version.ref = "lifecycle" }
+
+# Compose BOM and UI Components
+compose-bom = { group = "androidx.compose", name = "compose-bom", version.ref = "compose-bom" }
+compose-ui = { group = "androidx.compose.ui", name = "ui" }
+compose-ui-graphics = { group = "androidx.compose.ui", name = "ui-graphics" }
+compose-ui-tooling-preview = { group = "androidx.compose.ui", name = "ui-tooling-preview" }
+compose-ui-tooling = { group = "androidx.compose.ui", name = "ui-tooling" }
+compose-ui-test-manifest = { group = "androidx.compose.ui", name = "ui-test-manifest" }
+compose-material3 = { group = "androidx.compose.material3", name = "material3" }
+compose-material-icons-core = { group = "androidx.compose.material", name = "material-icons-core" }
+compose-material-icons-extended = { group = "androidx.compose.material", name = "material-icons-extended" }
+
+# Jetpack Navigation Compose (Requested)
+navigation-compose = { group = "androidx.navigation", name = "navigation-compose", version.ref = "navigation-compose" }
+
+# Hilt Dependency Injection (Requested)
+hilt-android = { group = "com.google.dagger", name = "hilt-android", version.ref = "hilt" }
+hilt-compiler = { group = "com.google.dagger", name = "hilt-android-compiler", version.ref = "hilt" }
+hilt-navigation-compose = { group = "androidx.hilt", name = "hilt-navigation-compose", version.ref = "hilt-navigation-compose" }
+
+# Room Database persistence (Requested)
+room-runtime = { group = "androidx.room", name = "room-runtime", version.ref = "room" }
+room-ktx = { group = "androidx.room", name = "room-ktx", version.ref = "room" }
+room-compiler = { group = "androidx.room", name = "room-compiler", version.ref = "room" }
+
+# WorkManager background support (Requested)
+work-runtime = { group = "androidx.work", name = "work-runtime-ktx", version.ref = "workmanager" }
+
+# Coil generic image loader (Requested)
+coil-compose = { group = "io.coil-kt", name = "coil-compose", version.ref = "coil" }
+
+# Basic testing components
+junit = { group = "junit", name = "junit", version = "4.13.2" }
+androidx-junit = { group = "androidx.test.ext", name = "junit", version = "1.2.1" }
+androidx-espresso-core = { group = "androidx.test.espresso", name = "espresso-core", version = "3.6.1" }
+
+[plugins]
+# Android Application Gradle Plugin: Handles app-level compilation and APK bundling.
+android-application = { id = "com.android.application", version.ref = "agp" }
+# Kotlin JVM / Android Plugin: Integrates Kotlin source file compilation with Gradle.
+kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
+# Kotlin Compose Compiler Plugin: Configures the multi-phase Compose compiler targeting Kotlin 2.x.
+kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
+# Google Devtools KSP companion: Executes lighting fast annotation processing for Room/Hilt.
+google-devtools-ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }
+# Dagger Hilt build support plugin: Automates bytecode generation for class-level inject sites.
+hilt = { id = "com.google.dagger.hilt.android", version.ref = "hilt" }
+# Chaquopy Gradle Plugin: Enables Python interpreter and libraries access inside Android apps.
+chaquopy = { id = "com.chaquo.python", version.ref = "chaquopy" }

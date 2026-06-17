@@ -1,0 +1,801 @@
+package com.example
+
+import android.content.Intent
+import android.os.Bundle
+import android.util.Log
+import android.widget.Toast
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.*
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import coil.compose.SubcomposeAsyncImage
+import com.example.ui.theme.MyApplicationTheme
+import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.launch
+import javax.inject.Inject
+
+sealed interface ShareSheetState {
+    object Loading : ShareSheetState
+    data class Error(val message: String) : ShareSheetState
+    data class Success(val url: String, val info: VideoInfo) : ShareSheetState
+}
+
+@AndroidEntryPoint
+class ShareReceiverActivity : ComponentActivity() {
+
+    @Inject
+    lateinit var ytdlpEngine: YtdlpEngine
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
+
+        // Extract shared link when ACTION_SEND intent is delivered
+        val text = if (intent?.action == Intent.ACTION_SEND && intent.type == "text/plain") {
+            intent.getStringExtra(Intent.EXTRA_TEXT)
+        } else {
+            null
+        }
+
+        val url = text?.let { extractUrl(it) }
+
+        if (url == null) {
+            Toast.makeText(this, "لم يتم العثور على رابط صالح", Toast.LENGTH_LONG).show()
+            finish()
+            return
+        }
+
+        setContent {
+            MyApplicationTheme {
+                val coroutineScope = rememberCoroutineScope()
+                var state by remember { mutableStateOf<ShareSheetState>(ShareSheetState.Loading) }
+
+                LaunchedEffect(url) {
+                    coroutineScope.launch {
+                        Log.d("PureDownload", "البدء في جلب معلومات الرابط: $url")
+                        val result = ytdlpEngine.extractInfo(url)
+                        result.onSuccess { info ->
+                            Log.d("PureDownload", "نجح جلب معلومات الفيديو!")
+                            Log.d("PureDownload", "عنوان الفيديو: ${info.title}")
+                            Log.d("PureDownload", "المدة الإجمالية: ${info.duration} ثانية")
+                            Log.d("PureDownload", "عدد الجودات المتاحة: ${info.formats.size}")
+                            info.formats.forEach { f ->
+                                Log.d("PureDownload", "صيغة: ID=${f.formatId}, دقة=${f.resolution}, امتداد=${f.ext}, acodec=${f.acodec}, vcodec=${f.vcodec}")
+                            }
+                            state = ShareSheetState.Success(url, info)
+                        }.onFailure { exception ->
+                            val errMsg = exception.message ?: "حدث خطأ غير معروف"
+                            Log.e("PureDownload", "فشل جلب معلومات الفيديو: $errMsg", exception)
+                            state = ShareSheetState.Error(errMsg)
+                        }
+                    }
+                }
+
+                ShareSheetContainer(
+                    state = state,
+                    onDismiss = { finish() },
+                    onStartDownload = { formatId, ext ->
+                        triggerDownload(url, formatId, ext)
+                    }
+                )
+            }
+        }
+    }
+
+    /**
+     * Extracts absolute url patterns using regular expressions (matches http/https links).
+     */
+    private fun extractUrl(text: String): String? {
+        val regex = "https?://[\\w\\d:#@%/;\$()~_?\\+-=\\\\\\.&]+".toRegex()
+        return regex.find(text)?.value
+    }
+
+    /**
+     * Placeholder trigger for actual downloads. Will start Foreground Service in the next prompts.
+     */
+    private fun triggerDownload(url: String, formatId: String, ext: String) {
+        Toast.makeText(this, "بدء تحميل الجودة: $formatId", Toast.LENGTH_SHORT).show()
+        Log.d("PureDownload", "جرى طلب التحميل: URL=$url, Format=$formatId, Ext=$ext")
+        // Implementation for service start will continue in physical download step.
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ShareSheetContainer(
+    state: ShareSheetState,
+    onDismiss: () -> Unit,
+    onStartDownload: (formatId: String, ext: String) -> Unit
+) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+        containerColor = MaterialTheme.colorScheme.background,
+        dragHandle = { BottomSheetDefaults.DragHandle(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f)) }
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding(),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            when (state) {
+                is ShareSheetState.Loading -> {
+                    // Visually Premium Custom Skeleton / Loading Sheet
+                    LoadingSkeletonLayout()
+                }
+
+                is ShareSheetState.Error -> {
+                    ErrorContentLayout(
+                        errorMessage = state.message,
+                        onDismiss = onDismiss
+                    )
+                }
+
+                is ShareSheetState.Success -> {
+                    VideoDetailsContentLayout(
+                        url = state.url,
+                        videoInfo = state.info,
+                        onStartDownload = { formatId, ext ->
+                            onStartDownload(formatId, ext)
+                            onDismiss()
+                        }
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Beautiful skeleton shimmer / pulsing loader ensuring perfect visual consistency during extraction.
+ */
+@Composable
+fun LoadingSkeletonLayout() {
+    val infiniteTransition = rememberInfiniteTransition(label = "shimmer")
+    val alpha by infiniteTransition.animateFloat(
+        initialValue = 0.3f,
+        targetValue = 0.8f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 800, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "skeleton_fade"
+    )
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 24.dp, end = 24.dp, bottom = 40.dp, top = 8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        // Thumbnail pulse skeleton layout
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(180.dp)
+                .clip(RoundedCornerShape(16.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = alpha))
+        )
+
+        Spacer(modifier = Modifier.height(20.dp))
+
+        // Title skeleton pulse
+        Box(
+            modifier = Modifier
+                .fillMaxWidth(0.9f)
+                .height(20.dp)
+                .clip(RoundedCornerShape(4.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = alpha))
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth(0.6f)
+                .height(16.dp)
+                .clip(RoundedCornerShape(4.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = alpha))
+        )
+
+        Spacer(modifier = Modifier.height(30.dp))
+
+        // Spinner centered nicely
+        CircularProgressIndicator(
+            modifier = Modifier.size(36.dp),
+            color = MaterialTheme.colorScheme.primary,
+            strokeWidth = 3.dp
+        )
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Text(
+            text = "تحليل وتجهيز الفيديو...",
+            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+            color = MaterialTheme.colorScheme.onSurface
+        )
+
+        Spacer(modifier = Modifier.height(4.dp))
+
+        Text(
+            text = "نستخرج الصيغ والجودات المتاحة للتحميل عبر yt-dlp",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center
+        )
+    }
+}
+
+@Composable
+fun ErrorContentLayout(
+    errorMessage: String,
+    onDismiss: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 24.dp, end = 24.dp, bottom = 44.dp, top = 16.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Box(
+            modifier = Modifier
+                .size(72.dp)
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.2f)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.Close,
+                contentDescription = "خطأ",
+                tint = MaterialTheme.colorScheme.error,
+                modifier = Modifier.size(36.dp)
+            )
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        Text(
+            text = "فشل استخراج معلومات الفيديو",
+            style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+            color = MaterialTheme.colorScheme.error
+        )
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.15f))
+        ) {
+            Text(
+                text = errorMessage,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onBackground,
+                modifier = Modifier.padding(16.dp),
+                textAlign = TextAlign.Center
+            )
+        }
+
+        Spacer(modifier = Modifier.height(32.dp))
+
+        Button(
+            onClick = onDismiss,
+            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(48.dp),
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            Text("إغلاق النافذة", fontWeight = FontWeight.Bold, color = Color.White)
+        }
+    }
+}
+
+/**
+ * Custom-branded layout displaying rich title information, collapsible groups of video formats, and action triggers.
+ */
+@Composable
+fun VideoDetailsContentLayout(
+    url: String,
+    videoInfo: VideoInfo,
+    onStartDownload: (formatId: String, ext: String) -> Unit
+) {
+    var selectedFormat by remember { mutableStateOf<FormatInfo?>(null) }
+    var expandedMergedVideo by remember { mutableStateOf(true) } // Opened by default as requested
+    var expandedAudioOnly by remember { mutableStateOf(false) }
+    var expandedVideoOnly by remember { mutableStateOf(false) }
+
+    // Parse structures
+    val allFormats = videoInfo.formats
+
+    // Audio-only formats (mp3, m4a, webm audio)
+    val audioFormats = allFormats.filter {
+        it.vcodec.contains("none", ignoreCase = true) || it.vcodec.isEmpty()
+    }
+
+    // Video-only formats (silent stream DASH)
+    val videoOnlyFormats = allFormats.filter {
+        !it.vcodec.contains("none", ignoreCase = true) && it.vcodec.isNotEmpty() &&
+                (it.acodec.contains("none", ignoreCase = true) || it.acodec.isEmpty())
+    }
+
+    // Merged formats / Combined packages (We display all video resolutions as potential Merged options)
+    // If user requests a video-only format, we will seamlessly merge it with bestaudio during download under the hood!
+    val mergedFormats = allFormats.filter {
+        !it.vcodec.contains("none", ignoreCase = true) && it.vcodec.isNotEmpty()
+    }
+
+    val animatedSelectedFormat = remember(selectedFormat) { selectedFormat }
+
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp, vertical = 8.dp)
+            .heightIn(max = 580.dp),
+        contentPadding = PaddingValues(bottom = 32.dp)
+    ) {
+        // Thumbnail & Title Box
+        item {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 18.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Wide high-contrast rounded thumbnail
+                Card(
+                    modifier = Modifier
+                        .size(width = 120.dp, height = 75.dp),
+                    shape = RoundedCornerShape(10.dp),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                ) {
+                    SubcomposeAsyncImage(
+                        model = videoInfo.thumbnailUrl,
+                        contentDescription = "صورة الفيديو",
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop,
+                        loading = {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                            )
+                        }
+                    )
+                }
+
+                Spacer(modifier = Modifier.width(16.dp))
+
+                Column(
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text(
+                        text = videoInfo.title,
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 15.sp,
+                            lineHeight = 20.sp
+                        ),
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        color = MaterialTheme.colorScheme.onBackground
+                    )
+
+                    Spacer(modifier = Modifier.height(4.dp))
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Schedule,
+                            contentDescription = "مدة الفيديو",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Text(
+                            text = formatDuration(videoInfo.duration),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+            Divider(color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f), thickness = 1.dp)
+            Spacer(modifier = Modifier.height(16.dp))
+        }
+
+        // Section 1: "فيديو وصوت (دقة كاملة)" (Video + Audio) - Merged formats
+        item {
+            CategoryHeader(
+                title = "فيديو وصوت (جودة فائقة)",
+                icon = Icons.Rounded.Movie,
+                itemCount = mergedFormats.size,
+                isExpanded = expandedMergedVideo,
+                onToggle = { expandedMergedVideo = !expandedMergedVideo }
+            )
+        }
+
+        if (expandedMergedVideo) {
+            if (mergedFormats.isEmpty()) {
+                item { EmptyCategoryLabel() }
+            } else {
+                items(mergedFormats) { format ->
+                    FormatItemRow(
+                        format = format,
+                        isSelected = selectedFormat?.formatId == format.formatId,
+                        isMergedFormat = true,
+                        onSelect = { selectedFormat = format }
+                    )
+                }
+            }
+        }
+
+        // Section 2: "صوت فقط" (Audio only)
+        item {
+            Spacer(modifier = Modifier.height(8.dp))
+            CategoryHeader(
+                title = "صوت فقط (موسيقى ومحاضرات)",
+                icon = Icons.Rounded.Audiotrack,
+                itemCount = audioFormats.size,
+                isExpanded = expandedAudioOnly,
+                onToggle = { expandedAudioOnly = !expandedAudioOnly }
+            )
+        }
+
+        if (expandedAudioOnly) {
+            if (audioFormats.isEmpty()) {
+                item { EmptyCategoryLabel() }
+            } else {
+                items(audioFormats) { format ->
+                    FormatItemRow(
+                        format = format,
+                        isSelected = selectedFormat?.formatId == format.formatId,
+                        isMergedFormat = false,
+                        onSelect = { selectedFormat = format }
+                    )
+                }
+            }
+        }
+
+        // Section 3: "فيديو فقط (بدون صوت)" (Video only silent)
+        item {
+            Spacer(modifier = Modifier.height(8.dp))
+            CategoryHeader(
+                title = "فيديو صامت (معرض صور أو تجميع)",
+                icon = Icons.Rounded.VideoLibrary,
+                itemCount = videoOnlyFormats.size,
+                isExpanded = expandedVideoOnly,
+                onToggle = { expandedVideoOnly = !expandedVideoOnly }
+            )
+        }
+
+        if (expandedVideoOnly) {
+            if (videoOnlyFormats.isEmpty()) {
+                item { EmptyCategoryLabel() }
+            } else {
+                items(videoOnlyFormats) { format ->
+                    FormatItemRow(
+                        format = format,
+                        isSelected = selectedFormat?.formatId == format.formatId,
+                        isMergedFormat = false,
+                        onSelect = { selectedFormat = format }
+                    )
+                }
+            }
+        }
+
+        // Section 4: Final Download Button & Selector Status
+        item {
+            Spacer(modifier = Modifier.height(32.dp))
+
+            val isEnabled = animatedSelectedFormat != null
+            val buttonColor = if (isEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant
+            val contentColor = if (isEnabled) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.outline
+
+            Button(
+                onClick = {
+                    animatedSelectedFormat?.let {
+                        // Pass format ID and typical file extension
+                        onStartDownload(it.formatId, it.ext)
+                    }
+                },
+                enabled = isEnabled,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = buttonColor,
+                    contentColor = contentColor,
+                    disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                    disabledContentColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)
+                ),
+                shape = RoundedCornerShape(14.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(52.dp),
+                elevation = ButtonDefaults.buttonElevation(
+                    defaultElevation = if (isEnabled) 4.dp else 0.dp,
+                    pressedElevation = if (isEnabled) 1.dp else 0.dp
+                )
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Download,
+                        contentDescription = "زر التحميل",
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Text(
+                        text = if (isEnabled) "بدء تحميل الجودة المحددة" else "اختر جودة فيديو للتحميل",
+                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.titleMedium.copy(fontSize = 15.sp)
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun CategoryHeader(
+    title: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    itemCount: Int,
+    isExpanded: Boolean,
+    onToggle: () -> Unit
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onToggle() },
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+        ),
+        shape = RoundedCornerShape(10.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(20.dp)
+                )
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp
+                    ),
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Badge(
+                    containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                    contentColor = MaterialTheme.colorScheme.primary
+                ) {
+                    Text(
+                        text = itemCount.toString(),
+                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                        modifier = Modifier.padding(horizontal = 4.dp)
+                    )
+                }
+            }
+
+            Icon(
+                imageVector = if (isExpanded) Icons.Rounded.KeyboardArrowUp else Icons.Rounded.KeyboardArrowDown,
+                contentDescription = if (isExpanded) "تقليص" else "توسيع",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(20.dp)
+            )
+        }
+    }
+}
+
+@Composable
+fun FormatItemRow(
+    format: FormatInfo,
+    isSelected: Boolean,
+    isMergedFormat: Boolean,
+    onSelect: () -> Unit
+) {
+    val borderColor = if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent
+    val backgroundColor = if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.08f) else Color.Transparent
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 6.dp, vertical = 4.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .border(1.dp, borderColor, RoundedCornerShape(10.dp))
+            .clickable { onSelect() },
+        colors = CardDefaults.cardColors(containerColor = backgroundColor)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                // Circular Radio-style Indicator Selector
+                Box(
+                    modifier = Modifier
+                        .size(20.dp)
+                        .clip(CircleShape)
+                        .border(
+                            width = 2.dp,
+                            color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.5f),
+                            shape = CircleShape
+                        )
+                        .padding(3.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (isSelected) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.primary)
+                        )
+                    }
+                }
+
+                Column {
+                    val cleanRes = format.resolution
+                        .replace("p", "")
+                        .replace("x", " × ")
+                        .trim()
+                    
+                    val formattedResolution = if (cleanRes.lowercase().contains("audio only")) {
+                        "ملف صوتي"
+                    } else if (cleanRes.isNotEmpty()) {
+                        "$cleanRes px"
+                    } else {
+                        "دقة تلقائية"
+                    }
+
+                    Text(
+                        text = formattedResolution,
+                        style = MaterialTheme.typography.bodyLarge.copy(
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp
+                        ),
+                        color = MaterialTheme.colorScheme.onBackground
+                    )
+
+                    Spacer(modifier = Modifier.height(2.dp))
+
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // Extension Badge
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(4.dp))
+                                .background(MaterialTheme.colorScheme.surfaceVariant)
+                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                        ) {
+                            Text(
+                                text = format.ext.uppercase(),
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 10.sp
+                                ),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+
+                        if (isMergedFormat && format.acodec.contains("none", ignoreCase = true)) {
+                            // Indicate live merging support!
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.1f))
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                            ) {
+                                Text(
+                                    text = "صوت + صورة ⚡",
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 10.sp
+                                    ),
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            Text(
+                text = formatFileSize(format.filesizeApprox),
+                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+@Composable
+fun EmptyCategoryLabel() {
+    Text(
+        text = "لا توجد صيغ متوافقة في هذا القسم",
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.outline,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(16.dp),
+        textAlign = TextAlign.Center
+    )
+}
+
+/**
+ * Beautiful duration text helper formatting seconds into logical video timeline tags.
+ */
+fun formatDuration(seconds: Int): String {
+    if (seconds <= 0) return "مدي غير متاح"
+    val h = seconds / 3600
+    val m = (seconds % 3600) / 60
+    val s = seconds % 60
+    return if (h > 0) {
+        String.format("%02d:%02d:%02d", h, m, s)
+    } else {
+        String.format("%02d:%02d", m, s)
+    }
+}
+
+/**
+ * Robust Byte converter matching requirements to human-readable memory counts.
+ */
+fun formatFileSize(bytes: Long): String {
+    if (bytes <= 0) return "حجم تلقائي"
+    val kcs = bytes / 1024.0
+    val mcs = kcs / 1024.0
+    val gcs = mcs / 1024.0
+    return when {
+        gcs >= 1.0 -> String.format("%.2f جيجابايت", gcs)
+        mcs >= 1.0 -> String.format("%.1f ميجابايت", mcs)
+        kcs >= 1.0 -> String.format("%.1f كيلوبايت", kcs)
+        else -> "$bytes بايت"
+    }
+}
