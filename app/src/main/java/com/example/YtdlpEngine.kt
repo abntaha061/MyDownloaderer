@@ -30,7 +30,8 @@ data class VideoInfo(
     val title: String,
     val duration: Int,
     val thumbnailUrl: String,
-    val formats: List<FormatInfo>
+    val formats: List<FormatInfo>,
+    val subtitles: List<SubtitleInfo>
 )
 
 data class FormatInfo(
@@ -40,6 +41,12 @@ data class FormatInfo(
     val filesizeApprox: Long,
     val acodec: String,
     val vcodec: String
+)
+
+data class SubtitleInfo(
+    val code: String,
+    val name: String,
+    val type: String // "manual" or "auto"
 )
 
 /**
@@ -52,7 +59,7 @@ class YtdlpEngine @Inject constructor(
 ) {
 
     /**
-     * Extracts full video formatting and download information.
+     * Extracts full video formatting, download and subtitle information.
      * Running strictly on withContext(Dispatchers.IO) since Python GIL locks the calling thread.
      */
     suspend fun extractInfo(url: String): Result<VideoInfo> = withContext(Dispatchers.IO) {
@@ -74,6 +81,7 @@ class YtdlpEngine @Inject constructor(
             val duration = pyResult.get("duration")?.toInt() ?: 0
             val thumbnailUrl = pyResult.get("thumbnail")?.toString() ?: ""
             val formatsPyList = pyResult.get("formats")?.asList() ?: emptyList()
+            val subtitlesPyList = pyResult.get("subtitles")?.asList() ?: emptyList()
 
             val formats = formatsPyList.map { formatObj ->
                 FormatInfo(
@@ -86,20 +94,31 @@ class YtdlpEngine @Inject constructor(
                 )
             }
 
-            Result.success(VideoInfo(title, duration, thumbnailUrl, formats))
+            val subtitles = subtitlesPyList.map { subObj ->
+                SubtitleInfo(
+                    code = subObj.get("code")?.toString() ?: "",
+                    name = subObj.get("name")?.toString() ?: "",
+                    type = subObj.get("type")?.toString() ?: ""
+                )
+            }
+
+            Result.success(VideoInfo(title, duration, thumbnailUrl, formats, subtitles))
         } catch (e: Exception) {
             Result.failure(Exception("حدث خطأ أثناء استخراج معلومات الفيديو: ${e.message}", e))
         }
     }
 
     /**
-     * Triggers actual media stream download using the specified format. Uses a dynamic native FFmpeg loading tactic.
+     * Triggers actual media stream download using the specified format, custom subtitles & SponsorBlock segment rules.
      * Runs strictly on withContext(Dispatchers.IO) to prevent UI blockages.
      */
     suspend fun startDownload(
         url: String,
         formatId: String,
         outputPath: String,
+        subtitleLang: String? = null,
+        sponsorblockAction: String = "none",
+        sponsorblockCategories: Set<String> = emptySet(),
         onProgress: (DownloadProgress) -> Unit
     ): Result<Unit> = withContext(Dispatchers.IO) {
         try {
@@ -145,6 +164,9 @@ class YtdlpEngine @Inject constructor(
                 formatId,
                 outputPath,
                 ffmpegLocation,
+                subtitleLang,
+                sponsorblockAction,
+                sponsorblockCategories.toList(),
                 progressListener
             )
 

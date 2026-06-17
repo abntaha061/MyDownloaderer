@@ -13,6 +13,8 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -44,6 +46,7 @@ sealed interface ShareSheetState {
     data class Success(val url: String, val info: VideoInfo) : ShareSheetState
 }
 
+@Suppress("DEPRECATION")
 @AndroidEntryPoint
 class ShareReceiverActivity : ComponentActivity() {
 
@@ -83,9 +86,6 @@ class ShareReceiverActivity : ComponentActivity() {
                             Log.d("PureDownload", "عنوان الفيديو: ${info.title}")
                             Log.d("PureDownload", "المدة الإجمالية: ${info.duration} ثانية")
                             Log.d("PureDownload", "عدد الجودات المتاحة: ${info.formats.size}")
-                            info.formats.forEach { f ->
-                                Log.d("PureDownload", "صيغة: ID=${f.formatId}, دقة=${f.resolution}, امتداد=${f.ext}, acodec=${f.acodec}, vcodec=${f.vcodec}")
-                            }
                             state = ShareSheetState.Success(url, info)
                         }.onFailure { exception ->
                             val errMsg = exception.message ?: "حدث خطأ غير معروف"
@@ -98,8 +98,8 @@ class ShareReceiverActivity : ComponentActivity() {
                 ShareSheetContainer(
                     state = state,
                     onDismiss = { finish() },
-                    onStartDownload = { formatId, ext ->
-                        triggerDownload(url, formatId, ext)
+                    onStartDownload = { formatId, ext, subtitleLang, sponsorblockAction, sponsorblockCategories ->
+                        triggerDownload(url, formatId, ext, subtitleLang, sponsorblockAction, sponsorblockCategories)
                     }
                 )
             }
@@ -115,12 +115,19 @@ class ShareReceiverActivity : ComponentActivity() {
     }
 
     /**
-     * Placeholder trigger for actual downloads. Will start Foreground Service in the next prompts.
+     * Trigger video download with advanced options.
      */
-    private fun triggerDownload(url: String, formatId: String, ext: String) {
+    private fun triggerDownload(
+        url: String,
+        formatId: String,
+        ext: String,
+        subtitleLang: String?,
+        sponsorblockAction: String,
+        sponsorblockCategories: Set<String>
+    ) {
         Toast.makeText(this, "بدء تحميل الجودة: $formatId", Toast.LENGTH_SHORT).show()
-        Log.d("PureDownload", "جرى طلب التحميل: URL=$url, Format=$formatId, Ext=$ext")
-        // Implementation for service start will continue in physical download step.
+        Log.d("PureDownload", "جرى طلب التحميل: URL=$url, Format=$formatId, Ext=$ext, Sub=$subtitleLang, SB_Action=$sponsorblockAction, SB_Categories=$sponsorblockCategories")
+        // Note: The physical download service integration will hook up to these options dynamically
     }
 }
 
@@ -129,7 +136,7 @@ class ShareReceiverActivity : ComponentActivity() {
 fun ShareSheetContainer(
     state: ShareSheetState,
     onDismiss: () -> Unit,
-    onStartDownload: (formatId: String, ext: String) -> Unit
+    onStartDownload: (formatId: String, ext: String, subtitleLang: String?, sponsorblockAction: String, sponsorblockCategories: Set<String>) -> Unit
 ) {
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -146,7 +153,6 @@ fun ShareSheetContainer(
         ) {
             when (state) {
                 is ShareSheetState.Loading -> {
-                    // Visually Premium Custom Skeleton / Loading Sheet
                     LoadingSkeletonLayout()
                 }
 
@@ -161,8 +167,8 @@ fun ShareSheetContainer(
                     VideoDetailsContentLayout(
                         url = state.url,
                         videoInfo = state.info,
-                        onStartDownload = { formatId, ext ->
-                            onStartDownload(formatId, ext)
+                        onStartDownload = { formatId, ext, sub, sbAction, sbCats ->
+                            onStartDownload(formatId, ext, sub, sbAction, sbCats)
                             onDismiss()
                         }
                     )
@@ -194,7 +200,6 @@ fun LoadingSkeletonLayout() {
             .padding(start = 24.dp, end = 24.dp, bottom = 40.dp, top = 8.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // Thumbnail pulse skeleton layout
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -205,7 +210,6 @@ fun LoadingSkeletonLayout() {
 
         Spacer(modifier = Modifier.height(20.dp))
 
-        // Title skeleton pulse
         Box(
             modifier = Modifier
                 .fillMaxWidth(0.9f)
@@ -226,7 +230,6 @@ fun LoadingSkeletonLayout() {
 
         Spacer(modifier = Modifier.height(30.dp))
 
-        // Spinner centered nicely
         CircularProgressIndicator(
             modifier = Modifier.size(36.dp),
             color = MaterialTheme.colorScheme.primary,
@@ -317,6 +320,38 @@ fun ErrorContentLayout(
     }
 }
 
+@Composable
+fun CustomPillSelector(
+    selected: Boolean,
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val bgColor = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+    val contentColor = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+    val borderColor = if (selected) Color.Transparent else MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
+
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(20.dp))
+            .background(bgColor)
+            .border(1.dp, borderColor, RoundedCornerShape(20.dp))
+            .clickable { onClick() }
+            .padding(horizontal = 14.dp, vertical = 8.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyMedium.copy(
+                fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                fontSize = 13.sp
+            ),
+            color = contentColor,
+            textAlign = TextAlign.Center
+        )
+    }
+}
+
 /**
  * Custom-branded layout displaying rich title information, collapsible groups of video formats, and action triggers.
  */
@@ -324,29 +359,29 @@ fun ErrorContentLayout(
 fun VideoDetailsContentLayout(
     url: String,
     videoInfo: VideoInfo,
-    onStartDownload: (formatId: String, ext: String) -> Unit
+    onStartDownload: (formatId: String, ext: String, subtitleLang: String?, sponsorblockAction: String, sponsorblockCategories: Set<String>) -> Unit
 ) {
     var selectedFormat by remember { mutableStateOf<FormatInfo?>(null) }
-    var expandedMergedVideo by remember { mutableStateOf(true) } // Opened by default as requested
+    var expandedMergedVideo by remember { mutableStateOf(true) } 
     var expandedAudioOnly by remember { mutableStateOf(false) }
     var expandedVideoOnly by remember { mutableStateOf(false) }
 
-    // Parse structures
+    // Advanced Options fields
+    var selectedSubtitleLang by remember { mutableStateOf<String?>(null) }
+    var sponsorblockAction by remember { mutableStateOf("none") } // none, mark, remove
+    var selectedSponsorblockCategories by remember { mutableStateOf(setOf<String>()) }
+
     val allFormats = videoInfo.formats
 
-    // Audio-only formats (mp3, m4a, webm audio)
     val audioFormats = allFormats.filter {
         it.vcodec.contains("none", ignoreCase = true) || it.vcodec.isEmpty()
     }
 
-    // Video-only formats (silent stream DASH)
     val videoOnlyFormats = allFormats.filter {
         !it.vcodec.contains("none", ignoreCase = true) && it.vcodec.isNotEmpty() &&
                 (it.acodec.contains("none", ignoreCase = true) || it.acodec.isEmpty())
     }
 
-    // Merged formats / Combined packages (We display all video resolutions as potential Merged options)
-    // If user requests a video-only format, we will seamlessly merge it with bestaudio during download under the hood!
     val mergedFormats = allFormats.filter {
         !it.vcodec.contains("none", ignoreCase = true) && it.vcodec.isNotEmpty()
     }
@@ -360,7 +395,6 @@ fun VideoDetailsContentLayout(
             .heightIn(max = 580.dp),
         contentPadding = PaddingValues(bottom = 32.dp)
     ) {
-        // Thumbnail & Title Box
         item {
             Row(
                 modifier = Modifier
@@ -368,7 +402,6 @@ fun VideoDetailsContentLayout(
                     .padding(bottom = 18.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Wide high-contrast rounded thumbnail
                 Card(
                     modifier = Modifier
                         .size(width = 120.dp, height = 75.dp),
@@ -431,7 +464,7 @@ fun VideoDetailsContentLayout(
             Spacer(modifier = Modifier.height(16.dp))
         }
 
-        // Section 1: "فيديو وصوت (دقة كاملة)" (Video + Audio) - Merged formats
+        // Section 1: "فيديو وصوت (جودة فائقة)"
         item {
             CategoryHeader(
                 title = "فيديو وصوت (جودة فائقة)",
@@ -457,7 +490,7 @@ fun VideoDetailsContentLayout(
             }
         }
 
-        // Section 2: "صوت فقط" (Audio only)
+        // Section 2: "صوت فقط"
         item {
             Spacer(modifier = Modifier.height(8.dp))
             CategoryHeader(
@@ -484,7 +517,7 @@ fun VideoDetailsContentLayout(
             }
         }
 
-        // Section 3: "فيديو فقط (بدون صوت)" (Video only silent)
+        // Section 3: "فيديو فقط (بدون صوت)"
         item {
             Spacer(modifier = Modifier.height(8.dp))
             CategoryHeader(
@@ -511,6 +544,230 @@ fun VideoDetailsContentLayout(
             }
         }
 
+        // Section: "Advanced Options" (خيارات متقدمة)
+        item {
+            Spacer(modifier = Modifier.height(16.dp))
+            var expandedAdvanced by remember { mutableStateOf(false) }
+            
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { expandedAdvanced = !expandedAdvanced },
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+                ),
+                shape = RoundedCornerShape(10.dp)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Settings,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Text(
+                            text = "خيارات متقدمة (ترجمة وSponsorBlock)",
+                            style = MaterialTheme.typography.titleMedium.copy(
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp
+                            ),
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+
+                    Icon(
+                        imageVector = if (expandedAdvanced) Icons.Rounded.KeyboardArrowUp else Icons.Rounded.KeyboardArrowDown,
+                        contentDescription = if (expandedAdvanced) "تقليص" else "توسيع",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
+
+            AnimatedVisibility(visible = expandedAdvanced) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 12.dp, start = 8.dp, end = 8.dp)
+                ) {
+                    // Subtitle Section
+                    Text(
+                        text = "ترجمة الفيديو المصاحبة:",
+                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
+
+                    if (videoInfo.subtitles.isEmpty()) {
+                        Text(
+                            text = "لا تتوفر ملفات ترجمة مدمجة أو تلقائية لهذا الفيديو.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.outline,
+                            modifier = Modifier.padding(bottom = 16.dp)
+                        )
+                    } else {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState())
+                                .padding(bottom = 16.dp),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            CustomPillSelector(
+                                selected = selectedSubtitleLang == null,
+                                label = "بدون ترجمة",
+                                onClick = { selectedSubtitleLang = null }
+                            )
+                            videoInfo.subtitles.forEach { sub ->
+                                CustomPillSelector(
+                                    selected = selectedSubtitleLang == sub.code,
+                                    label = "${sub.name} (${if (sub.type == "manual") "يدوية" else "آلية"})",
+                                    onClick = { selectedSubtitleLang = sub.code }
+                                )
+                            }
+                        }
+                    }
+
+                    Divider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.12f), modifier = Modifier.padding(bottom = 16.dp))
+
+                    // SponsorBlock Section
+                    Text(
+                        text = "تخطي إعلانات ومقاطع SponsorBlock:",
+                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        val options = listOf(
+                            "none" to "تعطيل الميزة",
+                            "mark" to "تعليم المقاطع",
+                            "remove" to "حذف وقص"
+                        )
+                        options.forEach { (action, label) ->
+                            CustomPillSelector(
+                                selected = sponsorblockAction == action,
+                                label = label,
+                                onClick = { sponsorblockAction = action },
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                    }
+
+                    if (sponsorblockAction != "none") {
+                        Text(
+                            text = "الفئات المراد معالجتها:",
+                            style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(bottom = 6.dp)
+                        )
+
+                        val categories = listOf(
+                            "sponsor" to "إعلان ترويجي أو ممول (Sponsor)",
+                            "intro" to "مقدمة وشارة البداية (Intro)",
+                            "outro" to "خاتمة وشكر النهاية (Outro)",
+                            "selfpromo" to "عروض ترويجية ذاتية (Self-promo)",
+                            "interaction" to "طلب التفاعل: إعجاب ومتابعة (Interaction)",
+                            "music_offtopic" to "موسيقى أو محتوى حشو خارجي (Music off-topic)"
+                        )
+
+                        Column(
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                            modifier = Modifier.padding(bottom = 12.dp)
+                        ) {
+                            categories.forEach { (cat, label) ->
+                                val isChecked = selectedSponsorblockCategories.contains(cat)
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .clickable {
+                                            selectedSponsorblockCategories = if (isChecked) {
+                                                selectedSponsorblockCategories - cat
+                                            } else {
+                                                selectedSponsorblockCategories + cat
+                                            }
+                                        }
+                                        .padding(vertical = 4.dp, horizontal = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Checkbox(
+                                        checked = isChecked,
+                                        onCheckedChange = { checked ->
+                                            selectedSponsorblockCategories = if (checked == true) {
+                                                selectedSponsorblockCategories + cat
+                                            } else {
+                                                selectedSponsorblockCategories - cat
+                                            }
+                                        },
+                                        colors = CheckboxDefaults.colors(checkedColor = MaterialTheme.colorScheme.primary)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = label,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
+                            }
+                        }
+
+                        if (sponsorblockAction == "remove") {
+                            Text(
+                                text = "⚠️ تنبيه: ميزة الحذف تتطلب توفر ffmpeg بشكل سليم، وإلا قد لا تعمل المقاطع بشكل متناسق.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.padding(bottom = 12.dp)
+                            )
+                        }
+                    }
+
+                    // Alert Disclaimer Card
+                    Card(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.05f)
+                        ),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.15f))
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Info,
+                                contentDescription = "تنبيه هام",
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Text(
+                                text = "آليات تجاوز قيود يوتيوب وتحديد الصيغ تتغير من وقت لآخر؛ حدّث نسخة yt-dlp بشكل دوري للحفاظ على عمل هذه الميزة.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                lineHeight = 16.sp
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
         // Section 4: Final Download Button & Selector Status
         item {
             Spacer(modifier = Modifier.height(32.dp))
@@ -522,8 +779,13 @@ fun VideoDetailsContentLayout(
             Button(
                 onClick = {
                     animatedSelectedFormat?.let {
-                        // Pass format ID and typical file extension
-                        onStartDownload(it.formatId, it.ext)
+                        onStartDownload(
+                            it.formatId,
+                            it.ext,
+                            selectedSubtitleLang,
+                            sponsorblockAction,
+                            selectedSponsorblockCategories
+                        )
                     }
                 },
                 enabled = isEnabled,
@@ -656,7 +918,6 @@ fun FormatItemRow(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                // Circular Radio-style Indicator Selector
                 Box(
                     modifier = Modifier
                         .size(20.dp)
@@ -708,7 +969,6 @@ fun FormatItemRow(
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        // Extension Badge
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(4.dp))
@@ -726,7 +986,6 @@ fun FormatItemRow(
                         }
 
                         if (isMergedFormat && format.acodec.contains("none", ignoreCase = true)) {
-                            // Indicate live merging support!
                             Box(
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(4.dp))
