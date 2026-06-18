@@ -245,6 +245,9 @@ def download_video(url, format_id, output_path, ffmpeg_location, subtitle_lang, 
         'concurrent_fragment_downloads': 4,
     }
     
+    if '+' in format_id:
+        ydl_opts['merge_output_format'] = 'mp4'
+    
     if cookie_file:
         ydl_opts['cookiefile'] = cookie_file
     
@@ -286,18 +289,32 @@ def download_video(url, format_id, output_path, ffmpeg_location, subtitle_lang, 
         # Find VTT file. When download template has fixed folder:
         # If output_path is like "/path/to/vid.mp4", subtitle can be "/path/to/vid.ar.vtt" or "/path/to/vid.en.vtt" etc.
         if subtitle_lang:
-            # Let's check both possibilities
             base_path, _ = os.path.splitext(output_path)
+            # Let's check both possibilities
             possible_vtt = f"{base_path}.{subtitle_lang}.vtt"
             if os.path.exists(possible_vtt):
-                convert_vtt_to_srt(possible_vtt)
+                res = convert_vtt_to_srt(possible_vtt)
+                if isinstance(res, dict) and res.get("success") and "srt_path" in res:
+                    dest_srt = f"{base_path}.srt"
+                    import shutil
+                    try:
+                        shutil.copy2(res["srt_path"], dest_srt)
+                    except Exception:
+                        pass
             else:
                 # Also do a quick scan of the directory of output_path
                 dir_name = os.path.dirname(output_path)
                 if os.path.exists(dir_name):
                     for file in os.listdir(dir_name):
                         if file.endswith('.vtt') and subtitle_lang in file:
-                            convert_vtt_to_srt(os.path.join(dir_name, file))
+                            res = convert_vtt_to_srt(os.path.join(dir_name, file))
+                            if isinstance(res, dict) and res.get("success") and "srt_path" in res:
+                                dest_srt = f"{base_path}.srt"
+                                import shutil
+                                try:
+                                    shutil.copy2(res["srt_path"], dest_srt)
+                                except Exception:
+                                    pass
                             
         return {"success": True}
     except Exception as e:

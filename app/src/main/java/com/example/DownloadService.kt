@@ -197,20 +197,19 @@ class DownloadService : Service() {
                 result.onSuccess {
                     val currentDbEntity = downloadRepository.getById(id)
                     if (currentDbEntity != null) {
-                        launch {
-                            if (currentDbEntity.convertToMp3) {
-                                convertVideoToMp3(currentDbEntity)
-                            } else {
-                                copyDownloadedFileToSaf(currentDbEntity.filePath)
-                                downloadRepository.update(
-                                    currentDbEntity.copy(
-                                        status = DownloadStatus.COMPLETED,
-                                        progressPercent = 100f,
-                                        errorMessage = null
-                                    )
+                        if (currentDbEntity.convertToMp3) {
+                            convertVideoToMp3(currentDbEntity)
+                        } else {
+                            copyDownloadedFileToSaf(currentDbEntity.filePath)
+                            scanFileWithSystem(currentDbEntity.filePath)
+                            downloadRepository.update(
+                                currentDbEntity.copy(
+                                    status = DownloadStatus.COMPLETED,
+                                    progressPercent = 100f,
+                                    errorMessage = null
                                 )
-                                cancelNotification(id.toInt())
-                            }
+                            )
+                            cancelNotification(id.toInt())
                         }
                     } else {
                         cancelNotification(id.toInt())
@@ -474,6 +473,7 @@ class DownloadService : Service() {
                 }
 
                 copyDownloadedFileToSaf(outputPath)
+                scanFileWithSystem(outputPath)
 
                 downloadRepository.update(
                     download.copy(
@@ -505,6 +505,23 @@ class DownloadService : Service() {
                 )
             )
             showErrorNotification(download.id.toInt(), download.title, errMsg)
+        }
+    }
+
+    private fun scanFileWithSystem(filePath: String) {
+        try {
+            val file = java.io.File(filePath)
+            if (file.exists()) {
+                android.media.MediaScannerConnection.scanFile(
+                    applicationContext,
+                    arrayOf(file.absolutePath),
+                    null,
+                    null
+                )
+                Log.d("DownloadService", "Triggered MediaScanner scan for: $filePath")
+            }
+        } catch (e: Exception) {
+            Log.e("DownloadService", "Failed to trigger MediaScanner: ${e.message}", e)
         }
     }
 

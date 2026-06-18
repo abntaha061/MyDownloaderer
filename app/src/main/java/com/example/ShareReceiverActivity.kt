@@ -135,6 +135,25 @@ class ShareReceiverActivity : ComponentActivity() {
         return regex.find(text)?.value
     }
 
+    private fun getAppDownloadsDir(): java.io.File {
+        return try {
+            val dir = java.io.File(
+                android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS),
+                "PureDown"
+            )
+            if (!dir.exists()) {
+                dir.mkdirs()
+            }
+            if (dir.exists()) {
+                dir
+            } else {
+                getExternalFilesDir(android.os.Environment.DIRECTORY_DOWNLOADS) ?: filesDir
+            }
+        } catch (e: Exception) {
+            getExternalFilesDir(android.os.Environment.DIRECTORY_DOWNLOADS) ?: filesDir
+        }
+    }
+
     /**
      * Trigger video download with advanced options.
      */
@@ -152,7 +171,7 @@ class ShareReceiverActivity : ComponentActivity() {
             try {
                 // Sanitize file name for file system safety
                 val cleanTitle = videoInfo.title.replace("[\\\\/:*?\"<>|]".toRegex(), "_")
-                val downloadsDir = getExternalFilesDir(android.os.Environment.DIRECTORY_DOWNLOADS) ?: filesDir
+                val downloadsDir = getAppDownloadsDir()
                 val outputFile = java.io.File(downloadsDir, "$cleanTitle.$ext")
 
                 // Convert categories to comma-separated string
@@ -210,7 +229,7 @@ class ShareReceiverActivity : ComponentActivity() {
     ) {
         lifecycleScope.launch {
             try {
-                val downloadsDir = getExternalFilesDir(android.os.Environment.DIRECTORY_DOWNLOADS) ?: filesDir
+                val downloadsDir = getAppDownloadsDir()
                 var firstId: Long? = null
 
                 items.forEach { (entry, ext, convertToMp3) ->
@@ -1051,10 +1070,15 @@ fun VideoDetailsContentLayout(
 
             Button(
                 onClick = {
-                    animatedSelectedFormat?.let {
+                    animatedSelectedFormat?.let { format ->
+                        val finalFormatId = if (!format.vcodec.contains("none", ignoreCase = true) && format.acodec.contains("none", ignoreCase = true)) {
+                            "${format.formatId}+bestaudio/best"
+                        } else {
+                            format.formatId
+                        }
                         onStartDownload(
-                            it.formatId,
-                            it.ext,
+                            finalFormatId,
+                            format.ext,
                             selectedSubtitleLang,
                             sponsorblockAction,
                             selectedSponsorblockCategories,
@@ -1259,7 +1283,7 @@ fun FormatItemRow(
                             )
                         }
 
-                        if (isMergedFormat && format.acodec.contains("none", ignoreCase = true)) {
+                        if (isMergedFormat && !format.acodec.contains("none", ignoreCase = true)) {
                             Box(
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(4.dp))
