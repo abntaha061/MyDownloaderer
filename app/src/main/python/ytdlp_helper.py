@@ -275,6 +275,12 @@ def extract_info(url, logger_callback=None, cookie_file=None):
         return {"error": str(e)}
 
 def download_video(url, format_id, output_path, ffmpeg_location, subtitle_lang, sponsorblock_action, sponsorblock_categories, callback, logger_callback=None, cookie_file=None):
+    import os
+    if output_path:
+        dir_name = os.path.dirname(output_path)
+        if dir_name:
+            os.makedirs(dir_name, exist_ok=True)
+
     def hook(d):
         try:
             status = d.get('status', 'downloading')

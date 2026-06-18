@@ -146,12 +146,17 @@ dependencies {
   testImplementation(libs.androidx.junit)
 }
 
+/*
 tasks.register("downloadFFmpeg") {
     val destFile = file("src/main/jniLibs/arm64-v8a/libffmpeg.so")
     inputs.property("url", "https://raw.githubusercontent.com/hzw1199/Android-FFmpeg-Prebuilt/main/ffmpeg-8.0.1/bin/ffmpeg")
     outputs.file(destFile)
 
     doLast {
+        if (destFile.exists() && destFile.length() > 1000000) {
+            println("FFmpeg binary already exists (size: ${destFile.length()} bytes). Skipping download.")
+            return@doLast
+        }
         if (!destFile.parentFile.exists()) {
             destFile.parentFile.mkdirs()
         }
@@ -183,4 +188,5 @@ tasks.configureEach {
         dependsOn("downloadFFmpeg")
     }
 }
+*/
 

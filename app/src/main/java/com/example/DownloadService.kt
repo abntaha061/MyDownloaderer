@@ -129,12 +129,35 @@ class DownloadService : Service() {
         val id = download.id
         val job = serviceScope.launch {
             try {
-                downloadRepository.update(
-                    download.copy(
+                val safeDownloadsDir = getExternalFilesDir(android.os.Environment.DIRECTORY_DOWNLOADS) ?: filesDir
+                val file = java.io.File(download.filePath)
+                val isSafePath = file.absolutePath.startsWith(applicationContext.filesDir.absolutePath) || 
+                                 (getExternalFilesDir(null)?.let { file.absolutePath.startsWith(it.parentFile.absolutePath) } ?: false)
+
+                val actualFilePath = if (isSafePath) {
+                    download.filePath
+                } else {
+                    val cleanFileName = file.name
+                    java.io.File(safeDownloadsDir, cleanFileName).absolutePath
+                }
+
+                val currentDownload = if (actualFilePath != download.filePath) {
+                    val updated = download.copy(
+                        filePath = actualFilePath,
                         status = DownloadStatus.RUNNING,
                         errorMessage = null
                     )
-                )
+                    downloadRepository.update(updated)
+                    updated
+                } else {
+                    downloadRepository.update(
+                        download.copy(
+                            status = DownloadStatus.RUNNING,
+                            errorMessage = null
+                        )
+                    )
+                    download
+                }
 
                 // Schedule watchdog fallback to trigger if killed
                 DownloadWorkManagerHelper.scheduleWatchdog(applicationContext, id)
@@ -142,12 +165,12 @@ class DownloadService : Service() {
                 var lastUpdatedTime = 0L
 
                 val result = ytdlpEngine.startDownload(
-                    url = download.url,
-                    formatId = download.formatId,
-                    outputPath = download.filePath,
-                    subtitleLang = download.subtitleLang,
-                    sponsorblockAction = download.sponsorblockAction,
-                    sponsorblockCategories = download.sponsorblockCategories
+                    url = currentDownload.url,
+                    formatId = currentDownload.formatId,
+                    outputPath = currentDownload.filePath,
+                    subtitleLang = currentDownload.subtitleLang,
+                    sponsorblockAction = currentDownload.sponsorblockAction,
+                    sponsorblockCategories = currentDownload.sponsorblockCategories
                         .split(",")
                         .filter { it.isNotEmpty() }
                         .toSet()
