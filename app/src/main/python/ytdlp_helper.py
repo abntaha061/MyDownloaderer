@@ -189,6 +189,7 @@ def extract_info(url, logger_callback=None, cookie_file=None):
     ydl_opts = {
         'skip_download': True,
         'extract_flat': False,
+        'extractor_args': {'youtube': {'player_client': ['default']}}
     }
     if cookie_file:
         ydl_opts['cookiefile'] = cookie_file
@@ -305,7 +306,8 @@ def download_video(url, format_id, output_path, ffmpeg_location, subtitle_lang, 
         'outtmpl': output_path,
         'progress_hooks': [hook],
         'concurrent_fragment_downloads': 4,
-    }
+        'extractor_args': {'youtube': {'player_client': ['default']}}
+     }
     
     if '+' in format_id:
         ydl_opts['merge_output_format'] = 'mp4'
