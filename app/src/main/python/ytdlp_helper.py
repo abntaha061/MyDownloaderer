@@ -10,6 +10,19 @@ def monkeypatch_ffmpeg():
         
         orig_determine = FFmpegPostProcessor._determine_executables
         
+        # Monkey-patch basename and probe_basename properties so yt-dlp identifies
+        # our custom-named 'libffmpeg.so' executable cleanly as 'ffmpeg'.
+        @property
+        def basename_prop(self):
+            return 'ffmpeg'
+            
+        @basename_prop.setter
+        def basename_prop(self, value):
+            pass
+            
+        FFmpegPostProcessor.basename = basename_prop
+        FFmpegPostProcessor.probe_basename = basename_prop
+        
         def new_determine(self, *args, **kwargs):
             try:
                 paths = orig_determine(self, *args, **kwargs)
@@ -52,6 +65,16 @@ def monkeypatch_ffmpeg():
                     print("[PureDownload-MonkeyPatch] Error getting nativeLibraryDir dynamically:", str(e))
             
             print("[PureDownload-MonkeyPatch] Resolved ffmpeg path:", paths.get('ffmpeg'))
+            msg = f"[PureDownload-MonkeyPatch] Resolved ffmpeg path: {paths.get('ffmpeg')}"
+            try:
+                if hasattr(self, 'write_debug'):
+                    self.write_debug(msg)
+                elif hasattr(self, '_downloader') and self._downloader:
+                    self._downloader.to_screen(msg)
+                elif hasattr(self, 'downloader') and self.downloader:
+                    self.downloader.to_screen(msg)
+            except Exception:
+                pass
             return paths
             
         FFmpegPostProcessor._determine_executables = new_determine
