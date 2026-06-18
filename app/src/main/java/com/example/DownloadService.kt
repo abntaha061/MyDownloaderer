@@ -5,11 +5,13 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.IBinder
+import android.provider.MediaStore
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.documentfile.provider.DocumentFile
@@ -346,7 +348,12 @@ class DownloadService : Service() {
     private suspend fun copyDownloadedFileToSaf(filePath: String) {
         val file = File(filePath)
         if (!file.exists()) return
-        val targetFolderUri = settingsManager.defaultFolderUri.firstOrNull() ?: return
+
+        // Always copy to public Downloads using MediaStore so the user receives it in their standard folder
+        copyToPublicFolderViaMediaStore(file)
+
+        // Then copy to the user custom SAF folder if they configured it
+        val targetFolderUri = settingsManager.defaultFolderUri.firstOrNull() ?: ""
         if (targetFolderUri.isEmpty()) return
 
         try {
@@ -366,6 +373,48 @@ class DownloadService : Service() {
             }
         } catch (e: Exception) {
             Log.e("DownloadService", "Error copying file to SAF folder: ${e.message}", e)
+        }
+    }
+
+    private fun copyToPublicFolderViaMediaStore(file: File) {
+        if (!file.exists()) return
+        try {
+            val resolver = applicationContext.contentResolver
+            val mimeType = if (file.name.endsWith(".mp3", ignoreCase = true)) "audio/mpeg" else "video/mp4"
+            val contentValues = ContentValues().apply {
+                put(MediaStore.MediaColumns.DISPLAY_NAME, file.name)
+                put(MediaStore.MediaColumns.MIME_TYPE, mimeType)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    put(MediaStore.MediaColumns.RELATIVE_PATH, "Download/PureDown")
+                    put(MediaStore.MediaColumns.IS_PENDING, 1)
+                }
+            }
+
+            val collection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                MediaStore.Downloads.EXTERNAL_CONTENT_URI
+            } else {
+                Uri.parse("content://media/external/file")
+            }
+
+            val uri = resolver.insert(collection, contentValues)
+            if (uri != null) {
+                resolver.openOutputStream(uri)?.use { outStream ->
+                    file.inputStream().use { inStream ->
+                        inStream.copyTo(outStream)
+                    }
+                }
+
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    contentValues.clear()
+                    contentValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
+                    resolver.update(uri, contentValues, null, null)
+                }
+                Log.d("DownloadService", "Successfully saved file to Public Downloads via MediaStore: $uri")
+            } else {
+                Log.e("DownloadService", "Failed to insert MediaStore record for: ${file.name}")
+            }
+        } catch (e: Exception) {
+            Log.e("DownloadService", "Error saving to MediaStore: ${e.message}", e)
         }
     }
 

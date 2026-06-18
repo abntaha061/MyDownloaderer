@@ -17,6 +17,18 @@ def monkeypatch_ffmpeg():
                 paths = {'ffmpeg': None, 'ffprobe': None}
                 
             ffmpeg_loc = getattr(self, 'ffmpeg_location', None)
+            if not ffmpeg_loc:
+                if hasattr(self, 'get_param'):
+                    try:
+                        ffmpeg_loc = self.get_param('ffmpeg_location')
+                    except Exception:
+                        pass
+            if not ffmpeg_loc:
+                if hasattr(self, '_downloader') and self._downloader:
+                    ffmpeg_loc = self._downloader.params.get('ffmpeg_location')
+                elif hasattr(self, 'downloader') and self.downloader:
+                    ffmpeg_loc = self.downloader.params.get('ffmpeg_location')
+
             if ffmpeg_loc:
                 if os.path.isdir(ffmpeg_loc):
                     for name in ['libffmpeg.so', 'ffmpeg']:
@@ -30,15 +42,16 @@ def monkeypatch_ffmpeg():
             if not paths.get('ffmpeg'):
                 try:
                     from os.path import exists, join
-                    from jnius import autoclass
-                    context = autoclass('com.chaquo.python.Python').getPlatform().getApplication()
+                    from com.chaquo.python import Python
+                    context = Python.getPlatform().getApplication()
                     native_dir = context.getApplicationInfo().nativeLibraryDir
                     p = join(native_dir, 'libffmpeg.so')
                     if exists(p):
                         paths['ffmpeg'] = p
-                except Exception:
-                    pass
+                except Exception as e:
+                    print("[PureDownload-MonkeyPatch] Error getting nativeLibraryDir dynamically:", str(e))
             
+            print("[PureDownload-MonkeyPatch] Resolved ffmpeg path:", paths.get('ffmpeg'))
             return paths
             
         FFmpegPostProcessor._determine_executables = new_determine

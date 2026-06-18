@@ -136,22 +136,7 @@ class ShareReceiverActivity : ComponentActivity() {
     }
 
     private fun getAppDownloadsDir(): java.io.File {
-        return try {
-            val dir = java.io.File(
-                android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS),
-                "PureDown"
-            )
-            if (!dir.exists()) {
-                dir.mkdirs()
-            }
-            if (dir.exists()) {
-                dir
-            } else {
-                getExternalFilesDir(android.os.Environment.DIRECTORY_DOWNLOADS) ?: filesDir
-            }
-        } catch (e: Exception) {
-            getExternalFilesDir(android.os.Environment.DIRECTORY_DOWNLOADS) ?: filesDir
-        }
+        return getExternalFilesDir(android.os.Environment.DIRECTORY_DOWNLOADS) ?: filesDir
     }
 
     /**
@@ -169,8 +154,8 @@ class ShareReceiverActivity : ComponentActivity() {
     ) {
         lifecycleScope.launch {
             try {
-                // Sanitize file name for file system safety
-                val cleanTitle = videoInfo.title.replace("[\\\\/:*?\"<>|]".toRegex(), "_")
+                // Sanitize file name for file system safety (including Arabic question mark)
+                val cleanTitle = videoInfo.title.replace("[\\\\/:*?\"<>|؟]".toRegex(), "_")
                 val downloadsDir = getAppDownloadsDir()
                 val outputFile = java.io.File(downloadsDir, "$cleanTitle.$ext")
 
@@ -233,7 +218,7 @@ class ShareReceiverActivity : ComponentActivity() {
                 var firstId: Long? = null
 
                 items.forEach { (entry, ext, convertToMp3) ->
-                    val cleanTitle = entry.title.replace("[\\\\/:*?\"<>|]".toRegex(), "_")
+                    val cleanTitle = entry.title.replace("[\\\\/:*?\"<>|؟]".toRegex(), "_")
                     val outputFile = java.io.File(downloadsDir, "$cleanTitle.$ext")
 
                     val entity = DownloadEntity(
