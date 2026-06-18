@@ -4,6 +4,49 @@ import traceback
 import re
 import os
 
+def monkeypatch_ffmpeg():
+    try:
+        from yt_dlp.postprocessor.ffmpeg import FFmpegPostProcessor
+        
+        orig_determine = FFmpegPostProcessor._determine_executables
+        
+        def new_determine(self, *args, **kwargs):
+            try:
+                paths = orig_determine(self, *args, **kwargs)
+            except Exception:
+                paths = {'ffmpeg': None, 'ffprobe': None}
+                
+            ffmpeg_loc = getattr(self, 'ffmpeg_location', None)
+            if ffmpeg_loc:
+                if os.path.isdir(ffmpeg_loc):
+                    for name in ['libffmpeg.so', 'ffmpeg']:
+                        p = os.path.join(ffmpeg_loc, name)
+                        if os.path.exists(p):
+                            paths['ffmpeg'] = p
+                            break
+                elif os.path.isfile(ffmpeg_loc) or os.path.exists(ffmpeg_loc):
+                    paths['ffmpeg'] = ffmpeg_loc
+
+            if not paths.get('ffmpeg'):
+                try:
+                    from os.path import exists, join
+                    from jnius import autoclass
+                    context = autoclass('com.chaquo.python.Python').getPlatform().getApplication()
+                    native_dir = context.getApplicationInfo().nativeLibraryDir
+                    p = join(native_dir, 'libffmpeg.so')
+                    if exists(p):
+                        paths['ffmpeg'] = p
+                except Exception:
+                    pass
+            
+            return paths
+            
+        FFmpegPostProcessor._determine_executables = new_determine
+    except Exception as e:
+        print("Error during FFmpegPostProcessor monkey-patch:", str(e))
+
+monkeypatch_ffmpeg()
+
 class YtDlpLogger:
     def __init__(self, callback):
         self.callback = callback
