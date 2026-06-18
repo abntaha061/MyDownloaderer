@@ -1,3 +1,6 @@
+import java.net.URL
+import java.net.HttpURLConnection
+
 plugins {
   alias(libs.plugins.android.application)
   alias(libs.plugins.kotlin.android)
@@ -142,3 +145,42 @@ dependencies {
   testImplementation(libs.junit)
   testImplementation(libs.androidx.junit)
 }
+
+tasks.register("downloadFFmpeg") {
+    val destFile = file("src/main/jniLibs/arm64-v8a/libffmpeg.so")
+    inputs.property("url", "https://raw.githubusercontent.com/hzw1199/Android-FFmpeg-Prebuilt/main/ffmpeg-8.0.1/bin/ffmpeg")
+    outputs.file(destFile)
+
+    doLast {
+        if (!destFile.parentFile.exists()) {
+            destFile.parentFile.mkdirs()
+        }
+        println("Downloading FFmpeg binary for arm64-v8a...")
+        try {
+            val url = URL("https://raw.githubusercontent.com/hzw1199/Android-FFmpeg-Prebuilt/main/ffmpeg-8.0.1/bin/ffmpeg")
+            val connection = url.openConnection() as HttpURLConnection
+            connection.connectTimeout = 30000
+            connection.readTimeout = 30000
+            connection.inputStream.use { input ->
+                destFile.outputStream().use { output ->
+                    val buffer = ByteArray(8192)
+                    var bytesRead: Int
+                    while (input.read(buffer).also { bytesRead = it } != -1) {
+                        output.write(buffer, 0, bytesRead)
+                    }
+                }
+            }
+            println("FFmpeg binary downloaded successfully to ${destFile.absolutePath}")
+        } catch (e: Exception) {
+            throw GradleException("Failed to download FFmpeg binary: ${e.message}", e)
+        }
+    }
+}
+
+tasks.configureEach {
+    if ((name.startsWith("merge") && name.endsWith("NativeLibs")) ||
+        (name.startsWith("merge") && name.contains("JniLib"))) {
+        dependsOn("downloadFFmpeg")
+    }
+}
+
