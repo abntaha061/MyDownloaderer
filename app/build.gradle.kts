@@ -84,18 +84,18 @@ android {
   }
 }
 
-// Chaquopy plugin configuration
-chaquopy {
-  defaultConfig {
-    version = "3.10"
-    pip {
-      install("yt-dlp==2026.6.9")
-      install("certifi==2025.1.31")
-      install("brotli==1.0.7")
-      install("websockets==14.1")
+  // Chaquopy plugin configuration
+  chaquopy {
+    defaultConfig {
+      version = "3.10"
+      pip {
+        install("yt-dlp==2026.6.9")
+        install("certifi==2025.1.31")
+        install("brotli==1.0.7")
+        install("websockets==14.1")
+      }
     }
   }
-}
 
 dependencies {
   // Compose BOM (Bill of Materials)
@@ -146,7 +146,6 @@ dependencies {
   testImplementation(libs.androidx.junit)
 }
 
-/*
 tasks.register("downloadFFmpeg") {
     val destFile = file("src/main/jniLibs/arm64-v8a/libffmpeg.so")
     inputs.property("url", "https://raw.githubusercontent.com/hzw1199/Android-FFmpeg-Prebuilt/main/ffmpeg-8.0.1/bin/ffmpeg")
@@ -188,5 +187,4 @@ tasks.configureEach {
         dependsOn("downloadFFmpeg")
     }
 }
-*/
 
